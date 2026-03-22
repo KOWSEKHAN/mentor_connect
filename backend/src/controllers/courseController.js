@@ -43,7 +43,25 @@ export const getCourse = async (req, res) => {
       return res.status(403).json({ message: 'Not authorized' });
     }
     
-    return res.json({ course });
+    // Find mentorshipId if mentor exists
+    let mentorshipId = null;
+    if (mentorId) {
+      const mentorship = await Mentorship.findOne({
+        mentor: mentorId,
+        mentee: menteeId,
+        status: 'active'
+      }).select('_id');
+      
+      if (mentorship) {
+        mentorshipId = mentorship._id.toString();
+      }
+    }
+    
+    // Add mentorshipId to course object
+    const courseObj = course.toObject();
+    courseObj.mentorshipId = mentorshipId;
+    
+    return res.json({ course: courseObj });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Server error' });

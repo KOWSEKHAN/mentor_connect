@@ -6,8 +6,8 @@ export default function NotFound(){
       <Header/>
       <div className="min-h-[60vh] flex items-center justify-center">
         <div className="text-center">
-          <h1 className="text-4xl font-bold">404</h1>
-          <p className="mt-2 text-gray-600">Page not found</p>
+          <h1 className="text-4xl font-bold text-white">404</h1>
+          <p className="mt-2 text-slate-400">Page not found</p>
         </div>
       </div>
       <Footer/>

@@ -14,6 +14,7 @@ const userSchema = new mongoose.Schema({
   // Legacy fields for backward compatibility
   resumeURL: { type: String },
   extractedSkills: { type: [String], default: [] },
+  lastSeen: { type: Date },
   createdAt: { type: Date, default: Date.now }
 })
 

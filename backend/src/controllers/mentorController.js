@@ -86,6 +86,8 @@ export const getAllMentors = async (req, res) => {
 export const getMenteeWorkspace = async (req, res) => {
   try {
     const { menteeId } = req.params;
+    const mentorId = req.user._id;
+    
     if (!menteeId) {
       return res.status(400).json({ success: false, message: 'Mentee ID is required' });
     }
@@ -95,12 +97,35 @@ export const getMenteeWorkspace = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Mentee not found' });
     }
 
+    // Find active mentorship
+    const Mentorship = (await import('../models/Mentorship.js')).default;
+    const mentorship = await Mentorship.findOne({
+      mentor: mentorId,
+      mentee: menteeId,
+      status: 'active'
+    }).populate('mentee', 'name email').populate('mentor', 'name email');
+
+    // Find course for this mentorship
+    const Course = (await import('../models/Course.js')).default;
+    const course = await Course.findOne({
+      mentor: mentorId,
+      mentee: menteeId
+    }).populate('mentor', 'name email').populate('mentee', 'name email');
+
     return res.json({
       success: true,
       mentee,
-      notes: [],
-      messages: [],
-      progress: []
+      mentorship: mentorship ? {
+        _id: mentorship._id,
+        mentorshipId: mentorship._id.toString(),
+        domain: mentorship.domain,
+        progress: mentorship.progress,
+        status: mentorship.status
+      } : null,
+      course: course ? course.toObject() : null,
+      notes: course?.notes || '',
+      progress: mentorship?.progress || course?.progress || 0,
+      status: mentorship?.status || 'active'
     });
   } catch (err) {
     console.error(err);

@@ -3,10 +3,13 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Header from '../../components/Header'
 import Footer from '../../components/Footer'
+import AppSidebar from '../../components/AppSidebar'
 import Card from '../../components/Card'
 import ToastContainer, { showToast } from '../../components/Toast'
 import { useAuth } from '../../utils/auth'
 import api from '../../utils/api'
+import { motion } from 'framer-motion'
+import Skeleton from '../../components/ui/Skeleton'
 
 export default function Profile() {
   const { user: authUser } = useAuth()
@@ -106,9 +109,20 @@ export default function Profile() {
     return (
       <>
         <Header />
-        <main className="max-w-4xl mx-auto p-6">
-          <div className="text-center py-8">Loading profile...</div>
-        </main>
+        <div className="flex min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800">
+          <AppSidebar userRole="mentee" />
+          <main className="flex-1 p-6 max-w-4xl">
+            <Skeleton className="h-8 w-48 mb-6" />
+            <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-6 space-y-4">
+              <Skeleton className="h-24 w-24 rounded-full" />
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-4 w-48" />
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-12 w-3/4" />
+            </div>
+          </main>
+        </div>
         <Footer />
       </>
     )
@@ -118,140 +132,182 @@ export default function Profile() {
     <>
       <Header />
       <ToastContainer />
-      <main className="max-w-4xl mx-auto p-6">
-        <button
-          onClick={() => navigate(-1)}
-          className="mb-4 px-4 py-2 rounded bg-gray-200 hover:bg-gray-300"
-        >
-          ← Back to Dashboard
-        </button>
-        <h2 className="text-2xl font-semibold mb-6">My Profile</h2>
+      <div className="flex min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800">
+        <AppSidebar userRole="mentee" />
+        <main className="flex-1 p-6 max-w-4xl">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+          >
+            <button
+              onClick={() => navigate('/mentee')}
+              className="mb-4 px-4 py-2 rounded-xl border border-slate-600 text-slate-300 hover:bg-white/5 transition-colors"
+            >
+              ← Back to Dashboard
+            </button>
+            <h2 className="text-2xl font-semibold mb-6 text-slate-100">My Profile</h2>
 
-        <Card>
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Profile Photo */}
-            <div>
-              <label className="block text-sm font-medium mb-2">Profile Photo</label>
-              {profile.profilePhoto && (
-                <div className="mb-2">
-                  <img 
-                    src={profile.profilePhoto} 
-                    alt="Profile" 
-                    className="w-24 h-24 object-cover rounded-full"
+            <Card className="bg-slate-800/80 border-slate-700 text-slate-100">
+              {/* Profile summary: Avatar, Name, Role, Skills */}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 pb-6 border-b border-slate-700 mb-6">
+                <div className="flex-shrink-0">
+                  {profile.profilePhoto ? (
+                    <img
+                      src={profile.profilePhoto}
+                      alt="Profile"
+                      className="w-20 h-20 object-cover rounded-full border-2 border-slate-600"
+                    />
+                  ) : (
+                    <div className="w-20 h-20 rounded-full bg-slate-700 flex items-center justify-center text-2xl text-slate-400 font-semibold">
+                      {profile.name?.charAt(0) || '?'}
+                    </div>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-xl font-semibold text-white">{profile.name || 'No name'}</h3>
+                  <p className="text-slate-400 text-sm">Mentee</p>
+                  {profile.interests.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {profile.interests.map((interest, idx) => (
+                        <span
+                          key={idx}
+                          className="px-2 py-1 bg-indigo-600/30 text-indigo-300 rounded-full text-xs"
+                        >
+                          {interest}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-6">
+                {/* Profile Photo */}
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-slate-300">Profile Photo</label>
+                  {profile.profilePhoto && (
+                    <div className="mb-2">
+                      <img
+                        src={profile.profilePhoto}
+                        alt="Profile"
+                        className="w-24 h-24 object-cover rounded-full border border-slate-600"
+                      />
+                    </div>
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setProfilePhotoFile(e.target.files[0])}
+                    className="w-full p-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-200 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-indigo-600 file:text-white file:text-sm"
+                  />
+                  {profilePhotoFile && (
+                    <p className="text-sm text-slate-400 mt-1">New photo selected: {profilePhotoFile.name}</p>
+                  )}
+                </div>
+
+                {/* Name */}
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-slate-300">Name</label>
+                  <input
+                    type="text"
+                    value={profile.name}
+                    onChange={(e) => setProfile(prev => ({ ...prev, name: e.target.value }))}
+                    className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    required
                   />
                 </div>
-              )}
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(e) => setProfilePhotoFile(e.target.files[0])}
-                className="w-full p-2 border rounded-lg"
-              />
-              {profilePhotoFile && (
-                <p className="text-sm text-gray-600 mt-1">New photo selected: {profilePhotoFile.name}</p>
-              )}
-            </div>
 
-            {/* Name */}
-            <div>
-              <label className="block text-sm font-medium mb-2">Name</label>
-              <input
-                type="text"
-                value={profile.name}
-                onChange={(e) => setProfile(prev => ({ ...prev, name: e.target.value }))}
-                className="w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-            </div>
-
-            {/* Email */}
-            <div>
-              <label className="block text-sm font-medium mb-2">Email</label>
-              <input
-                type="email"
-                value={profile.email}
-                onChange={(e) => setProfile(prev => ({ ...prev, email: e.target.value }))}
-                className="w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-            </div>
-
-            {/* Interests */}
-            <div>
-              <label className="block text-sm font-medium mb-2">Interests</label>
-              <input
-                type="text"
-                value={interestsInput}
-                onChange={(e) => setInterestsInput(e.target.value)}
-                placeholder="e.g., React, Node.js, MongoDB (comma separated)"
-                className="w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Enter your interests/skills separated by commas. These will be used for mentor matching.
-              </p>
-              {profile.interests.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {profile.interests.map((interest, idx) => (
-                    <span
-                      key={idx}
-                      className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
-                    >
-                      {interest}
-                    </span>
-                  ))}
+                {/* Email */}
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-slate-300">Email</label>
+                  <input
+                    type="email"
+                    value={profile.email}
+                    onChange={(e) => setProfile(prev => ({ ...prev, email: e.target.value }))}
+                    className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    required
+                  />
                 </div>
-              )}
-            </div>
 
-            {/* Resume Upload */}
-            <div>
-              <label className="block text-sm font-medium mb-2">Resume (Optional)</label>
-              {profile.resumeUrl && (
-                <div className="mb-2">
-                  <a 
-                    href={profile.resumeUrl} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:underline text-sm"
+                {/* Interests */}
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-slate-300">Interests</label>
+                  <input
+                    type="text"
+                    value={interestsInput}
+                    onChange={(e) => setInterestsInput(e.target.value)}
+                    placeholder="e.g., React, Node.js, MongoDB (comma separated)"
+                    className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Enter your interests/skills separated by commas. These will be used for mentor matching.
+                  </p>
+                  {profile.interests.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {profile.interests.map((interest, idx) => (
+                        <span
+                          key={idx}
+                          className="px-2 py-1 bg-indigo-600/30 text-indigo-300 rounded-full text-sm"
+                        >
+                          {interest}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Resume Upload */}
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-slate-300">Resume (Optional)</label>
+                  {profile.resumeUrl && (
+                    <div className="mb-2">
+                      <a
+                        href={profile.resumeUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-indigo-400 hover:text-indigo-300 text-sm"
+                      >
+                        View current resume
+                      </a>
+                    </div>
+                  )}
+                  <input
+                    type="file"
+                    accept=".pdf,.docx,.txt"
+                    onChange={(e) => setResumeFile(e.target.files[0])}
+                    className="w-full p-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-200 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-indigo-600 file:text-white file:text-sm"
+                  />
+                  {resumeFile && (
+                    <p className="text-sm text-slate-400 mt-1">New resume selected: {resumeFile.name}</p>
+                  )}
+                  <p className="text-xs text-slate-500 mt-1">
+                    Upload a new resume to update your keywords automatically.
+                  </p>
+                </div>
+
+                {/* Submit Button */}
+                <div className="flex justify-end gap-4 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => navigate('/mentee')}
+                    className="px-4 py-2 border border-slate-600 rounded-xl text-slate-300 hover:bg-white/5 transition-colors"
                   >
-                    View current resume
-                  </a>
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 hover:shadow-indigo-500/20 disabled:opacity-50 transition-all"
+                  >
+                    {saving ? 'Saving...' : 'Save Changes'}
+                  </button>
                 </div>
-              )}
-              <input
-                type="file"
-                accept=".pdf,.docx,.txt"
-                onChange={(e) => setResumeFile(e.target.files[0])}
-                className="w-full p-2 border rounded-lg"
-              />
-              {resumeFile && (
-                <p className="text-sm text-gray-600 mt-1">New resume selected: {resumeFile.name}</p>
-              )}
-              <p className="text-xs text-gray-500 mt-1">
-                Upload a new resume to update your keywords automatically.
-              </p>
-            </div>
-
-            {/* Submit Button */}
-            <div className="flex justify-end gap-4">
-              <button
-                type="button"
-                onClick={() => navigate('/mentee')}
-                className="px-4 py-2 border rounded-lg hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={saving}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-              >
-                {saving ? 'Saving...' : 'Save Changes'}
-              </button>
-            </div>
-          </form>
-        </Card>
-      </main>
+              </form>
+            </Card>
+          </motion.div>
+        </main>
+      </div>
       <Footer />
     </>
   )

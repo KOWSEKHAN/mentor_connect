@@ -44,20 +44,44 @@ export const aiChat = async (req, res) => {
 };
 
 /**
- * Generate AI content for course
+ * Generate AI content for course (roadmap-step-bound).
  * POST /api/ai/generate-content
- * body: { courseId, domain, title }
+ * body: { courseId, domain, title, roadmapStepId } — roadmapStepId required
  */
 export const generateContent = async (req, res) => {
   try {
-    const { courseId, domain, title } = req.body;
-    
-    // Simulate AI-generated content
-    const content = `# ${title || 'Course Content'}
+    const { courseId, domain, title, roadmapStepId, roadmapId } = req.body;
 
-## Introduction to ${domain || 'the Domain'}
+    if (!roadmapStepId) {
+      return res.status(400).json({
+        message: 'AI content must be generated from roadmap step',
+      });
+    }
 
-Welcome to your learning journey! This course will help you master ${domain || 'this subject'}.
+    const RoadmapStep = (await import('../models/RoadmapStep.js')).default;
+    const step = await RoadmapStep.findById(roadmapStepId);
+    if (!step) {
+      return res.status(404).json({ message: 'Roadmap step not found' });
+    }
+    if (roadmapId && step.roadmapId.toString() !== roadmapId.toString()) {
+      return res.status(400).json({
+        message: 'Roadmap step does not belong to the specified roadmap',
+      });
+    }
+    if (step.aiContentGenerated === true) {
+      return res.status(400).json({
+        message: 'AI content already generated for this roadmap step',
+      });
+    }
+
+    const stepTitle = title || step.title || 'Course Content';
+    const stepDomain = domain || step.level || 'the Domain';
+
+    const content = `# ${stepTitle}
+
+## Introduction to ${stepDomain}
+
+Welcome to your learning journey! This course will help you master ${stepDomain}.
 
 ### Key Topics:
 1. Fundamentals and basics
@@ -79,7 +103,10 @@ Welcome to your learning journey! This course will help you master ${domain || '
 - Work on projects to reinforce learning
 
 This content is AI-generated and can be customized based on your specific needs.`;
-    
+
+    step.aiContentGenerated = true;
+    await step.save();
+
     return res.json({ content });
   } catch (err) {
     console.error(err);

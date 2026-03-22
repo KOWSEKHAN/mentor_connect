@@ -36,12 +36,12 @@ export default function AIChatBot({ course }) {
   }
 
   return (
-    <div className="bg-white rounded-2xl shadow p-6 h-full flex flex-col">
-      <h3 className="text-xl font-semibold mb-4">Ask AI</h3>
-      
+    <div className="bg-slate-800/80 backdrop-blur border border-slate-700 rounded-2xl p-6 h-full flex flex-col shadow-xl">
+      <h3 className="text-xl font-semibold mb-4 text-white">Ask AI</h3>
+
       <div className="flex-1 overflow-y-auto mb-4 space-y-4">
         {messages.length === 0 ? (
-          <div className="text-center text-gray-500 py-8">
+          <div className="text-center text-slate-400 py-8">
             Ask me anything about your course! I can help with study tips, roadmap guidance, and more.
           </div>
         ) : (
@@ -51,10 +51,10 @@ export default function AIChatBot({ course }) {
               className={`flex ${msg.from === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
-                className={`max-w-[80%] p-3 rounded-lg ${
+                className={`max-w-[70%] px-4 py-2 rounded-2xl ${
                   msg.from === 'user'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-900'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-slate-700 text-white'
                 }`}
               >
                 {msg.text}
@@ -64,8 +64,13 @@ export default function AIChatBot({ course }) {
         )}
         {loading && (
           <div className="flex justify-start">
-            <div className="bg-gray-100 p-3 rounded-lg">
-              <span className="animate-pulse">AI is thinking...</span>
+            <div className="bg-slate-700 text-slate-300 px-4 py-2 rounded-2xl flex items-center gap-1">
+              <span>AI is typing</span>
+              <span className="flex gap-0.5">
+                <span className="animate-bounce" style={{ animationDelay: '0ms' }}>.</span>
+                <span className="animate-bounce" style={{ animationDelay: '150ms' }}>.</span>
+                <span className="animate-bounce" style={{ animationDelay: '300ms' }}>.</span>
+              </span>
             </div>
           </div>
         )}
@@ -78,13 +83,13 @@ export default function AIChatBot({ course }) {
           onChange={(e) => setInput(e.target.value)}
           onKeyPress={(e) => e.key === 'Enter' && handleSend()}
           placeholder="Ask a question..."
-          className="flex-1 p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="flex-1 p-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           disabled={loading}
         />
         <button
           onClick={handleSend}
           disabled={loading || !input.trim()}
-          className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          className="px-6 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 hover:shadow-indigo-500/20 disabled:opacity-50 transition-all"
         >
           Send
         </button>

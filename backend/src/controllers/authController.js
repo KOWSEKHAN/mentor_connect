@@ -122,7 +122,8 @@ export const signup = async (req, res) => {
     const user = await User.create(userData)
 
     const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET, { expiresIn: '7d' })
-    res.status(201).json({ message: 'Signup successful', user: { id: user._id, name: user.name, email: user.email, role: user.role }, token })
+    const userPayload = { id: user._id, _id: user._id, name: user.name, email: user.email, role: user.role }
+    res.status(201).json({ message: 'Signup successful', user: userPayload, token })
   } catch (err) {
     console.error(err)
     res.status(500).json({ message: 'Server error' })
@@ -141,9 +142,26 @@ export const login = async (req, res) => {
     if (!match) return res.status(400).json({ message: 'Invalid credentials' })
 
     const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET, { expiresIn: '7d' })
-    res.json({ message: 'Login successful', user: { id: user._id, name: user.name, email: user.email, role: user.role }, token })
+    const userPayload = { id: user._id, _id: user._id, name: user.name, email: user.email, role: user.role }
+    res.json({ message: 'Login successful', user: userPayload, token })
   } catch (err) {
     console.error(err)
     res.status(500).json({ message: 'Server error' })
+  }
+}
+
+/**
+ * Get current user from JWT (for session restore / auth persistence)
+ * GET /api/auth/me
+ */
+export const getMe = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('-password').lean()
+    if (!user) return res.status(401).json({ message: 'User not found' })
+    const userPayload = { id: user._id, _id: user._id, name: user.name, email: user.email, role: user.role }
+    res.json({ user: userPayload })
+  } catch (err) {
+    console.error(err)
+    return res.status(401).json({ message: 'Not authorized' })
   }
 }

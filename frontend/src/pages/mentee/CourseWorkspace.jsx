@@ -7,6 +7,9 @@ import Footer from '../../components/Footer'
 import Sidebar from './workspace/Sidebar'
 import ContentView from './workspace/ContentView'
 import ChatBox from './workspace/ChatBox'
+import { RoadmapView, StepDetailsPanel } from '../../components/roadmap'
+import AIContentView from './workspace/AIContentView'
+import TasksPanel from './workspace/TasksPanel'
 
 export default function CourseWorkspace() {
   const { courseId } = useParams()
@@ -15,6 +18,7 @@ export default function CourseWorkspace() {
   const [course, setCourse] = useState(null)
   const [activeTab, setActiveTab] = useState('overview')
   const [loading, setLoading] = useState(true)
+  const [selectedStep, setSelectedStep] = useState(null)
 
   useEffect(() => {
     fetchCourse()
@@ -51,9 +55,11 @@ export default function CourseWorkspace() {
     return (
       <>
         <Header />
-        <main className="max-w-7xl mx-auto p-6">
-          <div className="text-center py-12">Loading course...</div>
-        </main>
+        <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800">
+          <main className="max-w-7xl mx-auto p-6">
+            <div className="text-center py-12 text-slate-400">Loading course...</div>
+          </main>
+        </div>
         <Footer />
       </>
     )
@@ -63,9 +69,11 @@ export default function CourseWorkspace() {
     return (
       <>
         <Header />
-        <main className="max-w-7xl mx-auto p-6">
-          <div className="text-center py-12">Course not found</div>
-        </main>
+        <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800">
+          <main className="max-w-7xl mx-auto p-6">
+            <div className="text-center py-12 text-slate-400">Course not found</div>
+          </main>
+        </div>
         <Footer />
       </>
     )
@@ -76,17 +84,18 @@ export default function CourseWorkspace() {
   return (
     <>
       <Header />
-      <main className="max-w-7xl mx-auto p-6">
-        <div className="mb-4">
-          <button
-            onClick={() => navigate('/mentee')}
-            className="text-blue-600 hover:text-blue-800 mb-2"
-          >
-            ← Back to Dashboard
-          </button>
-          <h2 className="text-2xl font-semibold">{course.title}</h2>
-          <p className="text-gray-600">{course.domain} • Mentor: {mentorName}</p>
-        </div>
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800">
+        <main className="max-w-7xl mx-auto p-6">
+          <div className="mb-6">
+            <button
+              onClick={() => navigate('/mentee')}
+              className="text-indigo-400 hover:text-indigo-300 mb-2 transition-all duration-200"
+            >
+              ← Back to Dashboard
+            </button>
+            <h2 className="text-2xl font-semibold text-white">{course.title}</h2>
+            <p className="text-slate-400">{course.domain} • Mentor: {mentorName}</p>
+          </div>
 
         <div className="flex gap-6 h-[calc(100vh-250px)]">
           {/* Sidebar */}
@@ -95,28 +104,71 @@ export default function CourseWorkspace() {
           </div>
 
           {/* Main Content Area */}
-          <div className="flex-1 flex flex-col">
-            <div className="flex-1 overflow-auto mb-4">
-              <ContentView
-                activeTab={activeTab}
-                course={course}
-                updateCourse={updateCourse}
-                courseId={courseId}
-                refreshCourse={refreshCourse}
-              />
-            </div>
-
-            {/* Chat Window - Pinned Bottom */}
-            <div className="h-80 flex-shrink-0">
-              <ChatBox
-                course={course}
-                userId={user._id || user.id}
-                userName={user.name}
-              />
-            </div>
+          <div className="flex-1 flex flex-col min-h-0 space-y-6">
+            {activeTab === 'roadmap' ? (
+              <div className="flex flex-col h-full gap-6 overflow-auto">
+                <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg">
+                <RoadmapView
+                  courseId={courseId}
+                  userRole="mentee"
+                  course={course}
+                  onStepSelect={setSelectedStep}
+                />
+                <StepDetailsPanel step={selectedStep} courseId={courseId} />
+                </div>
+                <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg min-h-[200px]">
+                  <AIContentView
+                    roadmapStepId={selectedStep?.stepId || selectedStep?._id}
+                    courseId={courseId}
+                    course={course}
+                    updateCourse={updateCourse}
+                    refreshCourse={refreshCourse}
+                  />
+                </div>
+                <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg min-h-[180px]">
+                  <TasksPanel
+                    roadmapStepId={selectedStep?.stepId || selectedStep?._id}
+                    course={course}
+                    updateCourse={updateCourse}
+                    refreshCourse={refreshCourse}
+                  />
+                </div>
+                <div className="h-80 flex-shrink-0 bg-slate-900 border border-slate-700 rounded-xl overflow-hidden">
+                  <ChatBox
+                    course={course}
+                    mentorshipId={course?.mentorshipId}
+                    userId={user._id || user.id}
+                    userName={user.name}
+                  />
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="flex-1 overflow-auto">
+                  <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg">
+                  <ContentView
+                    activeTab={activeTab}
+                    course={course}
+                    updateCourse={updateCourse}
+                    courseId={courseId}
+                    refreshCourse={refreshCourse}
+                  />
+                  </div>
+                </div>
+                <div className="h-80 flex-shrink-0 bg-slate-900 border border-slate-700 rounded-xl overflow-hidden">
+                  <ChatBox
+                    course={course}
+                    mentorshipId={course?.mentorshipId}
+                    userId={user._id || user.id}
+                    userName={user.name}
+                  />
+                </div>
+              </>
+            )}
           </div>
         </div>
       </main>
+      </div>
       <Footer />
     </>
   )

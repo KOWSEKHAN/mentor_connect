@@ -1,8 +1,12 @@
 import Header from '../../components/Header'
 import Footer from '../../components/Footer'
 import Card from '../../components/Card'
+import AppSidebar from '../../components/AppSidebar'
+import FloatingActionButton from '../../components/FloatingActionButton'
 import ToastContainer, { showToast } from '../../components/Toast'
 import MentorDirectory from '../../components/mentee/MentorDirectory'
+import Skeleton from '../../components/ui/Skeleton'
+import { motion } from 'framer-motion'
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../utils/auth'
 import { useNavigate } from 'react-router-dom'
@@ -190,15 +194,45 @@ export default function MenteeDashboard(){
 
   return (
     <>
-      <Header/>
-      <ToastContainer />
-      <main className="max-w-6xl mx-auto p-6">
-        <h2 className="text-2xl font-semibold mb-6">Hello, {user?.name} (Mentee)</h2>
+      <Header />
+      <div className="flex min-h-screen">
+        <AppSidebar userRole="mentee" />
+        <main className="flex-1 p-6 w-full max-w-[1400px] mx-auto">
+          <ToastContainer />
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+            className="space-y-8"
+          >
+        <h2 className="text-2xl font-semibold text-slate-100">Hello, {user?.name}</h2>
+
+        {/* Analytics cards */}
+        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 shadow-xl hover:scale-[1.02] transition-all duration-200">
+            <p className="text-sm text-slate-400">Active courses</p>
+            <p className="text-3xl font-semibold text-white mt-1">{courses.length}</p>
+          </div>
+          <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 shadow-xl hover:scale-[1.02] transition-all duration-200">
+            <p className="text-sm text-slate-400">With mentor</p>
+            <p className="text-3xl font-semibold text-white mt-1">{courses.filter((c) => c.mentor).length}</p>
+          </div>
+          <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 shadow-xl hover:scale-[1.02] transition-all duration-200">
+            <p className="text-sm text-slate-400">Avg. progress</p>
+            <p className="text-3xl font-semibold text-white mt-1">
+              {courses.length ? Math.round(courses.reduce((a, c) => a + (c.progress || 0), 0) / courses.length) : 0}%
+            </p>
+          </div>
+          <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 shadow-xl hover:scale-[1.02] transition-all duration-200">
+            <p className="text-sm text-slate-400">Recommended mentors</p>
+            <p className="text-3xl font-semibold text-white mt-1">{recommendedMentors.length}</p>
+          </div>
+        </section>
         
         {/* Section 1: Start a New Course */}
         <section className="mb-8">
-          <Card>
-            <h3 className="font-semibold text-xl mb-4">Start a New Course</h3>
+          <Card className="text-slate-100 bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 shadow-xl">
+            <h3 className="font-semibold text-xl mb-4 text-white">Start a New Course</h3>
             
             {/* Domain / Course Name Input */}
             <div className="relative mb-4">
@@ -213,14 +247,14 @@ export default function MenteeDashboard(){
                     setCourseSuggestions([])
                   }
                 }}
-                className="w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
               {loadingCourseSearch && (
-                <div className="absolute right-3 top-3 text-gray-400 text-sm">Searching...</div>
+                <div className="absolute right-3 top-3 text-slate-400 text-sm">Searching...</div>
               )}
               {selectedCourse && (
-                <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-lg">
-                  <span className="text-sm font-medium text-blue-800">
+                <div className="mt-2 p-2 bg-indigo-500/20 border border-indigo-500/30 rounded-xl">
+                  <span className="text-sm font-medium text-indigo-200">
                     Suggestion: {selectedCourse.name} ({selectedCourse.type === 'domain' ? 'Domain' : 'Course'})
                   </span>
                   <button
@@ -228,14 +262,14 @@ export default function MenteeDashboard(){
                       setSelectedCourse(null)
                       // Keep courseQuery value, just clear selection
                     }}
-                    className="ml-2 text-blue-600 hover:text-blue-800 text-sm"
+                    className="ml-2 text-indigo-400 hover:text-indigo-300 text-sm"
                   >
                     ✕
                   </button>
                 </div>
               )}
               {courseSuggestions.length > 0 && (
-                <ul className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                <ul className="absolute z-10 w-full mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-xl max-h-64 overflow-y-auto">
                   {courseSuggestions.map((item, index) => (
                     <li
                       key={index}
@@ -247,13 +281,12 @@ export default function MenteeDashboard(){
                       style={{
                         cursor: 'pointer',
                         padding: '8px',
-                        borderBottom: index < courseSuggestions.length - 1 ? '1px solid #f3f4f6' : 'none'
+                        borderBottom: index < courseSuggestions.length - 1 ? '1px solid rgba(51,65,85,0.5)' : 'none'
                       }}
-                      onMouseEnter={(e) => (e.target.style.background = '#E6F2FF')}
-                      onMouseLeave={(e) => (e.target.style.background = 'transparent')}
+                      className="hover:bg-white/5 rounded-lg"
                     >
-                      <div className="font-medium">{item.name}</div>
-                      <div className="text-xs text-gray-500">
+                      <div className="font-medium text-slate-200">{item.name}</div>
+                      <div className="text-xs text-slate-500">
                         {item.type === 'domain' ? 'Domain/Specialization' : 'Course'}
                       </div>
                     </li>
@@ -275,14 +308,14 @@ export default function MenteeDashboard(){
                     setMentorSuggestions([])
                   }
                 }}
-                className="w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
               {loadingMentorSearch && (
-                <div className="absolute right-3 top-3 text-gray-400 text-sm">Searching...</div>
+                <div className="absolute right-3 top-3 text-slate-400 text-sm">Searching...</div>
               )}
               {selectedMentor && (
-                <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded-lg">
-                  <span className="text-sm font-medium text-green-800">
+                <div className="mt-2 p-2 bg-green-500/20 border border-green-500/30 rounded-lg">
+                  <span className="text-sm font-medium text-green-300">
                     Selected: {selectedMentor.name} — Expertise: {selectedMentor.specialization}
                   </span>
                   <button
@@ -290,14 +323,14 @@ export default function MenteeDashboard(){
                       setSelectedMentor(null)
                       setMentorQuery('')
                     }}
-                    className="ml-2 text-green-600 hover:text-green-800 text-sm"
+                    className="ml-2 text-green-400 hover:text-green-300 text-sm"
                   >
                     ✕
                   </button>
                 </div>
               )}
               {mentorSuggestions.length > 0 && !selectedMentor && (
-                <ul className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                <ul className="absolute z-10 w-full mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-xl max-h-64 overflow-y-auto">
                   {mentorSuggestions.map((mentor, index) => (
                     <li
                       key={mentor._id}
@@ -306,16 +339,10 @@ export default function MenteeDashboard(){
                         setMentorQuery(mentor.name)
                         setMentorSuggestions([])
                       }}
-                      style={{
-                        cursor: 'pointer',
-                        padding: '8px',
-                        borderBottom: index < mentorSuggestions.length - 1 ? '1px solid #f3f4f6' : 'none'
-                      }}
-                      onMouseEnter={(e) => (e.target.style.background = '#E6F2FF')}
-                      onMouseLeave={(e) => (e.target.style.background = 'transparent')}
+                      className={`px-3 py-2 cursor-pointer hover:bg-white/10 text-slate-200 ${index < mentorSuggestions.length - 1 ? 'border-b border-slate-700' : ''}`}
                     >
                       <div className="font-medium">{mentor.name}</div>
-                      <div className="text-xs text-gray-500">
+                      <div className="text-xs text-slate-400">
                         Expertise: {mentor.specialization}
                       </div>
                     </li>
@@ -328,28 +355,17 @@ export default function MenteeDashboard(){
             <button
               disabled={!courseQuery.trim() || startingCourse}
               onClick={handleStartCourse}
-              style={{
-                cursor: courseQuery.trim() && !startingCourse ? 'pointer' : 'not-allowed',
-                opacity: courseQuery.trim() && !startingCourse ? 1 : 0.5,
-                transition: '0.2s',
-                width: '100%',
-                padding: '0.5rem 1rem',
-                borderRadius: '0.5rem',
-                backgroundColor: courseQuery.trim() && !startingCourse ? '#2563eb' : '#9ca3af',
-                color: 'white',
-                fontWeight: '500',
-                border: 'none'
-              }}
+              className="w-full py-2.5 px-4 rounded-xl font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed bg-indigo-600 text-white hover:bg-indigo-700 hover:shadow-lg hover:shadow-indigo-500/20"
             >
               {startingCourse ? 'Starting Course...' : (selectedMentor ? 'Request Mentor & Start Course' : 'Start Course')}
             </button>
             {selectedMentor && (
-              <p className="mt-2 text-sm text-gray-600 text-center">
+              <p className="mt-2 text-sm text-slate-400 text-center">
                 A mentor request will be sent when you start the course.
               </p>
             )}
             {!selectedMentor && courseQuery.trim() && (
-              <p className="mt-2 text-sm text-gray-600 text-center">
+              <p className="mt-2 text-sm text-slate-400 text-center">
                 Course will start in independent learning mode. You can add a mentor later.
               </p>
             )}
@@ -358,21 +374,21 @@ export default function MenteeDashboard(){
 
         {/* Section 2: My Courses */}
         <section className="mb-8">
-          <h3 className="font-semibold text-xl mb-4">My Courses</h3>
+          <h3 className="font-semibold text-xl mb-4 text-white">My Courses</h3>
           {courses.length === 0 ? (
-            <Card>
-              <div className="text-center text-gray-500 py-8">
+            <Card className="text-slate-400">
+              <div className="text-center py-8">
                 No courses yet. Start by searching for a mentor above!
               </div>
             </Card>
           ) : (
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {courses.map((course) => (
-                <Card key={course._id} className="cursor-pointer hover:shadow-lg transition" onClick={() => handleOpenWorkspace(course._id)}>
+                <Card key={course._id} className="cursor-pointer hover:scale-[1.02] transition-all duration-200 text-slate-100 bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 shadow-xl" onClick={() => handleOpenWorkspace(course._id)}>
                   <div className="mb-3">
-                    <h4 className="font-semibold text-lg mb-1">{course.title}</h4>
-                    <div className="text-sm text-gray-500 mb-2">{course.domain}</div>
-                    <div className="text-sm text-gray-600">
+                    <h4 className="font-semibold text-lg mb-1 text-white">{course.title}</h4>
+                    <div className="text-sm text-slate-400 mb-2">{course.domain}</div>
+                    <div className="text-sm text-slate-300">
                       Mentor: {course.mentor?.name || 'N/A'}
                     </div>
                   </div>
@@ -380,12 +396,12 @@ export default function MenteeDashboard(){
                   {/* Progress Bar */}
                   <div className="mb-4">
                     <div className="flex justify-between text-sm mb-1">
-                      <span className="text-gray-600">Progress</span>
-                      <span className="text-gray-600">{course.progress || 0}%</span>
+                      <span className="text-slate-400">Progress</span>
+                      <span className="text-slate-300">{course.progress || 0}%</span>
                     </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div className="w-full bg-slate-700 rounded-full h-2">
                       <div
-                        className="bg-blue-600 h-2 rounded-full transition-all"
+                        className="bg-indigo-600 h-2 rounded-full transition-all"
                         style={{ width: `${course.progress || 0}%` }}
                       ></div>
                     </div>
@@ -398,7 +414,7 @@ export default function MenteeDashboard(){
                           e.stopPropagation()
                           openMentorPicker(course._id)
                         }}
-                        className="flex-1 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm"
+                        className="flex-1 px-3 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors text-sm"
                       >
                         Add Mentor
                       </button>
@@ -408,7 +424,7 @@ export default function MenteeDashboard(){
                         e.stopPropagation()
                         handleOpenWorkspace(course._id)
                       }}
-                      className={`px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition ${!course.mentor ? 'flex-1' : 'w-full'}`}
+                      className={`px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 hover:shadow-indigo-500/20 transition-all text-sm ${!course.mentor ? 'flex-1' : 'w-full'}`}
                     >
                       Open Workspace
                     </button>
@@ -421,10 +437,10 @@ export default function MenteeDashboard(){
 
         {/* Mentor Picker Modal */}
         {showMentorPicker && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <Card className="max-w-md w-full mx-4">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+            <Card className="max-w-md w-full mx-4 text-slate-100 bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl shadow-xl p-8">
               <div className="flex justify-between items-center mb-4">
-                <h3 className="text-xl font-semibold">Select a Mentor</h3>
+                <h3 className="text-xl font-semibold text-white">Select a Mentor</h3>
                 <button
                   onClick={() => {
                     setShowMentorPicker(false)
@@ -432,7 +448,7 @@ export default function MenteeDashboard(){
                     setSelectedMentor(null)
                     setMentorQuery('')
                   }}
-                  className="text-gray-500 hover:text-gray-700"
+                  className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/10"
                 >
                   ✕
                 </button>
@@ -450,14 +466,14 @@ export default function MenteeDashboard(){
                       setMentorSuggestions([])
                     }
                   }}
-                  className="w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-400 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                 />
                 {loadingMentorSearch && (
-                  <div className="absolute right-3 top-3 text-gray-400 text-sm">Searching...</div>
+                  <div className="absolute right-3 top-3 text-slate-400 text-sm">Searching...</div>
                 )}
                 {selectedMentor && (
-                  <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded-lg">
-                    <span className="text-sm font-medium text-green-800">
+                  <div className="mt-2 p-2 bg-green-500/20 border border-green-500/30 rounded-lg">
+                    <span className="text-sm font-medium text-green-300">
                       Selected: {selectedMentor.name} — Expertise: {selectedMentor.specialization}
                     </span>
                     <button
@@ -465,14 +481,14 @@ export default function MenteeDashboard(){
                         setSelectedMentor(null)
                         setMentorQuery('')
                       }}
-                      className="ml-2 text-green-600 hover:text-green-800 text-sm"
+                      className="ml-2 text-green-400 hover:text-green-300 text-sm"
                     >
                       ✕
                     </button>
                   </div>
                 )}
                 {mentorSuggestions.length > 0 && !selectedMentor && (
-                  <ul className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                  <ul className="absolute z-10 w-full mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-xl max-h-64 overflow-y-auto">
                     {mentorSuggestions.map((mentor, index) => (
                       <li
                         key={mentor._id}
@@ -481,16 +497,10 @@ export default function MenteeDashboard(){
                           setMentorQuery(mentor.name)
                           setMentorSuggestions([])
                         }}
-                        style={{
-                          cursor: 'pointer',
-                          padding: '8px',
-                          borderBottom: index < mentorSuggestions.length - 1 ? '1px solid #f3f4f6' : 'none'
-                        }}
-                        onMouseEnter={(e) => (e.target.style.background = '#E6F2FF')}
-                        onMouseLeave={(e) => (e.target.style.background = 'transparent')}
+                        className={`px-3 py-2 cursor-pointer hover:bg-white/10 text-slate-200 ${index < mentorSuggestions.length - 1 ? 'border-b border-slate-700' : ''}`}
                       >
                         <div className="font-medium">{mentor.name}</div>
-                        <div className="text-xs text-gray-500">
+                        <div className="text-xs text-slate-400">
                           Expertise: {mentor.specialization}
                         </div>
                       </li>
@@ -507,14 +517,14 @@ export default function MenteeDashboard(){
                     setSelectedMentor(null)
                     setMentorQuery('')
                   }}
-                  className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+                  className="px-4 py-2 border border-slate-600 rounded-xl hover:bg-white/5 text-slate-300"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleAssignMentor}
                   disabled={!selectedMentor || assigningMentor === courseToAssign}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50"
                 >
                   {assigningMentor === courseToAssign ? 'Assigning...' : 'Assign Mentor'}
                 </button>
@@ -525,19 +535,23 @@ export default function MenteeDashboard(){
 
         {/* Section 3: Discover Mentors (Recommendations) */}
         <section>
-          <h3 className="font-semibold text-xl mb-4">Discover Mentors</h3>
-          <Card>
-            <h4 className="font-semibold text-lg mb-2">Recommended for you</h4>
-            <p className="text-sm text-gray-600 mb-4">
+          <h3 className="font-semibold text-xl mb-4 text-white">Discover Mentors</h3>
+          <Card className="text-slate-100 bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 shadow-xl">
+            <h4 className="font-semibold text-lg mb-2 text-white">Recommended for you</h4>
+            <p className="text-sm text-slate-400 mb-4">
               These mentors are recommended based on your resume and interests.
             </p>
 
             {loadingRecommendations && (
-              <div className="text-sm text-gray-500 py-4">Loading recommendations...</div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {[1, 2, 3].map((i) => (
+                  <Skeleton key={i} className="h-32" />
+                ))}
+              </div>
             )}
 
             {!loadingRecommendations && recommendedMentors.length === 0 && (
-              <div className="text-sm text-gray-500 py-4">
+              <div className="text-sm text-slate-500 py-4">
                 No personalized recommendations yet. Try adding your interests and resume.
               </div>
             )}
@@ -547,20 +561,20 @@ export default function MenteeDashboard(){
                 {recommendedMentors.map((mentor) => (
                   <div
                     key={mentor._id}
-                    className="border rounded-lg p-4 bg-white shadow-sm"
+                    className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 hover:scale-[1.02] transition-transform duration-200"
                   >
                     <div className="mb-2">
-                      <div className="font-semibold">{mentor.name}</div>
-                      <div className="text-sm text-gray-500">{mentor.email}</div>
+                      <div className="font-semibold text-slate-200">{mentor.name}</div>
+                      <div className="text-sm text-slate-500">{mentor.email}</div>
                     </div>
                     {mentor.interests && mentor.interests.length > 0 && (
                       <div className="mt-2">
-                        <div className="text-xs text-gray-500 mb-1">Interests</div>
+                        <div className="text-xs text-slate-500 mb-1">Interests</div>
                         <div className="flex flex-wrap gap-1">
                           {mentor.interests.slice(0, 6).map((interest) => (
                             <span
                               key={interest}
-                              className="px-2 py-0.5 rounded-full bg-gray-100 text-xs text-gray-700"
+                              className="px-2 py-0.5 rounded-full bg-slate-700 text-xs text-slate-300"
                             >
                               {interest}
                             </span>
@@ -569,18 +583,20 @@ export default function MenteeDashboard(){
                       </div>
                     )}
                     {typeof mentor.sharedInterestsCount === 'number' && (
-                      <div className="mt-3 text-xs text-gray-500">
+                      <div className="mt-3 text-xs text-slate-500">
                         Shared interests: {mentor.sharedInterestsCount}
                       </div>
                     )}
-                    {/* Intentionally no Request Mentor button in recommendations list */}
                   </div>
                 ))}
               </div>
             )}
           </Card>
         </section>
-      </main>
+          </motion.div>
+        </main>
+        <FloatingActionButton userRole="mentee" />
+      </div>
       <Footer/>
     </>
   )

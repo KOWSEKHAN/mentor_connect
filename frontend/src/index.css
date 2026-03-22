@@ -2,4 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-body { @apply bg-gray-50 text-gray-800; }
+body {
+  @apply bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 text-white antialiased;
+}
