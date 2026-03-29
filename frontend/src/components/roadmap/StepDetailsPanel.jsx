@@ -31,7 +31,7 @@ export default function StepDetailsPanel({ step, courseId }) {
 
   if (!step) {
     return (
-      <div className="bg-white rounded-2xl shadow p-6 flex items-center justify-center text-gray-500 min-h-[180px]">
+      <div className="bg-gray-800 border border-gray-700 rounded-xl shadow-lg p-6 flex items-center justify-center text-gray-300 min-h-[180px]">
         Select a roadmap step to see details and actions.
       </div>
     )
@@ -42,17 +42,17 @@ export default function StepDetailsPanel({ step, courseId }) {
   const subtopics = step.subtopics || []
 
   return (
-    <div className="bg-white rounded-2xl shadow p-6 flex flex-col min-h-[180px]">
+    <div className="bg-gray-800 border border-gray-700 rounded-xl shadow-lg p-6 flex flex-col min-h-[180px] text-gray-300">
       <div className="flex items-center gap-2 mb-2">
         <LevelBadge level={step.level} />
-        <span className="text-sm text-gray-500">Step {step.order}</span>
+        <span className="text-sm text-gray-300">Step {step.order}</span>
       </div>
-      <h3 className="text-lg font-semibold text-gray-900 mb-1">{step.title}</h3>
+      <h3 className="text-lg font-semibold text-white mb-1">{step.title}</h3>
       {step.description && (
-        <p className="text-sm text-gray-600 mb-3">{step.description}</p>
+        <p className="text-sm text-gray-300 mb-3">{step.description}</p>
       )}
       {subtopics.length > 0 && (
-        <ul className="text-sm text-gray-600 list-disc list-inside mb-4">
+        <ul className="text-sm text-gray-300 list-disc list-inside mb-4">
           {subtopics.map((s, i) => (
             <li key={i}>{s}</li>
           ))}
@@ -70,21 +70,21 @@ export default function StepDetailsPanel({ step, courseId }) {
         <button
           type="button"
           onClick={() => setViewContent((v) => !v)}
-          className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm"
+          className="px-4 py-2 border border-gray-700 rounded-lg hover:bg-gray-700/50 text-sm text-gray-200"
         >
           {viewContent ? 'Hide Content' : 'View Content'}
         </button>
         <button
           type="button"
           onClick={() => setViewTasks((v) => !v)}
-          className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm"
+          className="px-4 py-2 border border-gray-700 rounded-lg hover:bg-gray-700/50 text-sm text-gray-200"
         >
           {viewTasks ? 'Hide Tasks' : 'View Tasks'}
         </button>
       </div>
       {step.progress != null && (
         <div className="mt-3">
-          <p className="text-xs text-gray-500 mb-1">Progress</p>
+          <p className="text-xs text-gray-400 mb-1">Progress</p>
           <ProgressBar progress={step.progress} />
         </div>
       )}

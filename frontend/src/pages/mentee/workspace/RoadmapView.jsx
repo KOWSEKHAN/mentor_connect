@@ -51,9 +51,9 @@ export default function RoadmapView({ course, updateCourse, refreshCourse }) {
   }, [])
 
   return (
-    <div className="bg-white rounded-2xl shadow p-6 h-full overflow-auto">
+    <div className="bg-gray-800 border border-gray-700 rounded-xl shadow-lg p-6 h-full overflow-auto text-gray-300">
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-xl font-semibold">Learning Roadmap</h3>
+        <h3 className="text-xl font-semibold text-white">Learning Roadmap</h3>
         <button
           onClick={addStep}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
@@ -64,12 +64,12 @@ export default function RoadmapView({ course, updateCourse, refreshCourse }) {
 
       <div className="space-y-3">
         {roadmap.length === 0 ? (
-          <p className="text-gray-500 text-center py-8">No roadmap steps yet. Add one to get started!</p>
+          <p className="text-gray-400 text-center py-8">No roadmap steps yet. Add one to get started!</p>
         ) : (
           roadmap.map((step, index) => (
             <div
               key={index}
-              className="flex items-center p-4 border rounded-lg hover:bg-gray-50"
+              className="flex items-center p-4 border border-gray-700 rounded-lg hover:bg-gray-700/50"
             >
               <input
                 type="checkbox"
@@ -79,7 +79,7 @@ export default function RoadmapView({ course, updateCourse, refreshCourse }) {
               />
               <span
                 className={`ml-3 flex-1 ${
-                  step.completed ? 'line-through text-gray-500' : 'text-gray-900'
+                  step.completed ? 'line-through text-gray-400' : 'text-gray-200'
                 }`}
               >
                 {step.step}

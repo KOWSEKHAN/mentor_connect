@@ -6,7 +6,18 @@ const courseSchema = new mongoose.Schema({
   domain: { type: String, required: true },
   mentor: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // Optional for independent learning
   mentee: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  mentorshipId: { type: mongoose.Schema.Types.ObjectId, ref: 'Mentorship' },
+  // New explicit linkage fields (kept in sync with mentor/mentee for clarity)
+  mentorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  menteeId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   progress: { type: Number, default: 0, min: 0, max: 100 },
+  status: {
+    type: String,
+    enum: ['in_progress', 'completed'],
+    default: 'in_progress',
+  },
+  certificateIssued: { type: Boolean, default: false },
+  completedAt: { type: Date },
   aiContent: { type: String, default: '' },
   roadmap: [{
     step: String,

@@ -79,9 +79,13 @@ export default function MentorDirectory({ onRequestMentor }) {
               <div className="text-sm text-gray-600 mb-2">
                 Skills/Expertise: <span className="text-gray-500">General</span>
               </div>
-              <div className="flex items-center text-sm text-gray-600">
-                <span className="mr-1">Rating:</span>
-                <span className="text-gray-500">Not Rated</span>
+              <div className="flex items-center gap-2 text-sm text-gray-600">
+                <span className="text-amber-500" aria-hidden>
+                  ★ {typeof mentor.rating === 'number' ? mentor.rating.toFixed(1) : '0.0'}
+                </span>
+                <span className="text-gray-500">
+                  ({mentor.totalReviews ?? 0} review{(mentor.totalReviews ?? 0) === 1 ? '' : 's'})
+                </span>
               </div>
             </div>
             <button

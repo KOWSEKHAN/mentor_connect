@@ -2,7 +2,11 @@
 import Course from '../models/Course.js';
 import Mentorship from '../models/Mentorship.js';
 import User from '../models/User.js';
-import MentorRequest from '../models/MentorRequest.js';
+import {
+  awardCourseCompletion,
+  awardTaskCompletion,
+  taskRefFromTask,
+} from '../services/pointService.js';
 
 /**
  * Get mentee's courses
@@ -43,13 +47,16 @@ export const getCourse = async (req, res) => {
       return res.status(403).json({ message: 'Not authorized' });
     }
     
-    // Find mentorshipId if mentor exists
+    // Prefer hard linked mentorshipId when available, fallback to lookup.
     let mentorshipId = null;
-    if (mentorId) {
+    if (course.mentorshipId) {
+      mentorshipId = course.mentorshipId.toString();
+    } else if (mentorId) {
       const mentorship = await Mentorship.findOne({
-        mentor: mentorId,
-        mentee: menteeId,
-        status: 'active'
+        mentorId,
+        menteeId,
+        domain: course.domain || '',
+        status: { $in: ['accepted', 'completed'] }
       }).select('_id');
       
       if (mentorship) {
@@ -77,26 +84,67 @@ export const updateCourse = async (req, res) => {
     const { courseId } = req.params;
     const userId = req.user._id;
     const { aiContent, roadmap, tasks, notes, progress } = req.body;
-    
+
     const course = await Course.findById(courseId);
     if (!course) return res.status(404).json({ message: 'Course not found' });
-    
+
     // Check authorization
     const menteeId = course.mentee._id ? course.mentee._id.toString() : course.mentee.toString();
     const mentorId = course.mentor ? (course.mentor._id ? course.mentor._id.toString() : course.mentor.toString()) : null;
     if (menteeId !== userId.toString() && (mentorId && mentorId !== userId.toString())) {
       return res.status(403).json({ message: 'Not authorized' });
     }
-    
+
+    const menteeOid = course.mentee._id || course.mentee;
+    const wasComplete = course.status === 'completed' || (course.progress ?? 0) >= 100;
+
+    /** Index-aligned snapshot so keys stay stable after Mongoose assigns subdoc _ids on save. */
+    const oldTasksSnapshot =
+      tasks !== undefined
+        ? (course.tasks || []).map((t) => (t.toObject ? t.toObject() : { ...t }))
+        : [];
+
     if (aiContent !== undefined) course.aiContent = aiContent;
     if (roadmap !== undefined) course.roadmap = roadmap;
     if (tasks !== undefined) course.tasks = tasks;
     if (notes !== undefined) course.notes = notes;
-    if (progress !== undefined) course.progress = Math.max(0, Math.min(100, Number(progress)));
-    
+    if (progress !== undefined) {
+      course.progress = Math.max(0, Math.min(100, Number(progress)));
+      if (course.progress >= 100) {
+        course.status = 'completed';
+        if (!course.completedAt) course.completedAt = new Date();
+        course.certificateIssued = true;
+      }
+    }
+
+    const nowComplete = course.status === 'completed' || (course.progress ?? 0) >= 100;
+
     course.updatedAt = new Date();
     await course.save();
-    
+
+    if (tasks !== undefined) {
+      const mentorRef = course.mentor || course.mentorId;
+      const newList = course.tasks || [];
+      newList.forEach((t, i) => {
+        const oldT = oldTasksSnapshot[i];
+        const wasDone = !!(oldT && oldT.completed);
+        const tObj = t.toObject ? t.toObject() : t;
+        const nowDone = !!tObj.completed;
+        if (!wasDone && nowDone) {
+          const refKey = taskRefFromTask(tObj, i);
+          awardTaskCompletion(menteeOid, mentorRef, course._id, refKey).catch((e) =>
+            console.error('[points] task completion:', e)
+          );
+        }
+      });
+    }
+
+    if (!wasComplete && nowComplete) {
+      awardCourseCompletion(menteeOid, course._id).catch((e) =>
+        console.error('[points] course completion:', e)
+      );
+    }
+
     return res.json({ message: 'Course updated', course });
   } catch (err) {
     console.error(err);
@@ -116,15 +164,18 @@ export const createCourse = async (req, res) => {
     
     const mentorship = await Mentorship.findById(mentorshipId);
     if (!mentorship) return res.status(404).json({ message: 'Mentorship not found' });
-    if (mentorship.mentee.toString() !== menteeId.toString()) {
+    if (String(mentorship.menteeId) !== String(menteeId)) {
       return res.status(403).json({ message: 'Not authorized' });
     }
     
     const course = await Course.create({
       title,
       domain: domain || mentorship.domain,
-      mentor: mentorship.mentor,
-      mentee: menteeId
+      mentor: mentorship.mentorId,
+      mentee: menteeId,
+      mentorshipId: mentorship._id,
+      mentorId: mentorship.mentorId,
+      menteeId,
     });
     
     return res.status(201).json({ message: 'Course created', course });
@@ -165,10 +216,36 @@ export const assignMentorToCourse = async (req, res) => {
       return res.status(400).json({ message: 'Invalid mentor' });
     }
 
-    // Assign mentor to course (DO NOT create mentorship here)
+    // Assign mentor to course and keep linkage fields in sync.
+    // Important: Downstream UI depends on a Mentorship document existing.
     course.mentor = mentorId;
+    course.mentorId = mentorId;
+    course.menteeId = menteeId;
     course.updatedAt = new Date();
     await course.save();
+
+    // Ensure an accepted mentorship exists for chat/workspace + review gating.
+    const existingMentorship = await Mentorship.findOne({
+      mentorId,
+      menteeId,
+      domain: course.domain || '',
+      status: { $in: ['accepted', 'completed'] },
+    });
+
+    if (!existingMentorship) {
+      const createdMentorship = await Mentorship.create({
+        mentorId,
+        menteeId,
+        domain: course.domain || '',
+        status: 'accepted',
+        startedAt: new Date(),
+      });
+      course.mentorshipId = createdMentorship._id;
+      await course.save();
+    } else if (!course.mentorshipId) {
+      course.mentorshipId = existingMentorship._id;
+      await course.save();
+    }
 
     return res.json({ message: 'Mentor assigned to course', course });
   } catch (err) {
@@ -299,29 +376,31 @@ export const startCourse = async (req, res) => {
     const courseTitle = course.name;
     const courseDomain = course.type === 'domain' ? course.name : (course.domain || 'General');
 
-    // If mentor is selected, send mentor request
+    // If mentor is selected, create/update pending mentorship (single source of truth)
     if (mentor && mentor._id) {
       const mentorUser = await User.findById(mentor._id);
       if (!mentorUser || mentorUser.role !== 'mentor') {
         return res.status(400).json({ message: 'Invalid mentor' });
       }
 
-      // Check for existing pending request
-      const existingRequest = await MentorRequest.findOne({
-        mentee: menteeId,
-        mentor: mentor._id,
-        status: 'pending'
-      });
-
-      if (!existingRequest) {
-        // Create mentor request
-        await MentorRequest.create({
-          mentee: menteeId,
-          mentor: mentor._id,
-          domain: courseDomain,
-          message: `I would like to learn ${courseDomain}`
-        });
-      }
+      const ms = await Mentorship.findOneAndUpdate(
+        { mentorId: mentor._id, menteeId, domain: courseDomain || '' },
+        {
+          $setOnInsert: {
+            mentorId: mentor._id,
+            menteeId,
+            domain: courseDomain || '',
+            status: 'pending',
+            startedAt: new Date(),
+          },
+          $set: {
+            status: 'pending',
+            message: `I would like to learn ${courseDomain}`,
+          },
+        },
+        { upsert: true, new: true }
+      );
+      var createdMentorshipId = ms?._id || null;
     }
 
     // Create course (mentor is optional now)
@@ -329,11 +408,14 @@ export const startCourse = async (req, res) => {
       title: courseTitle,
       domain: courseDomain,
       mentor: mentor?._id || null,
-      mentee: menteeId
+      mentee: menteeId,
+      mentorshipId: createdMentorshipId || null,
+      mentorId: mentor?._id || null,
+      menteeId
     });
 
     return res.status(201).json({
-      message: mentor ? 'Course started and mentor request sent!' : 'Course started in independent learning mode!',
+      message: mentor ? 'Course started and mentorship request created!' : 'Course started in independent learning mode!',
       course: newCourse
     });
   } catch (err) {

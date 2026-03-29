@@ -89,16 +89,16 @@ export default function RoadmapView({ courseId, userRole, onStepSelect, course =
 
   if (loading) {
     return (
-      <div className="bg-white rounded-2xl shadow p-6 flex items-center justify-center min-h-[140px]">
-        <span className="text-gray-500">Loading roadmap...</span>
+      <div className="bg-gray-800 border border-gray-700 rounded-xl shadow-lg p-6 flex items-center justify-center min-h-[140px]">
+        <span className="text-gray-300">Loading roadmap...</span>
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className="bg-white rounded-2xl shadow p-6">
-        <p className="text-red-600 mb-2">{error}</p>
+      <div className="bg-gray-800 border border-gray-700 rounded-xl shadow-lg p-6">
+        <p className="text-red-400 mb-2">{error}</p>
         <button
           type="button"
           onClick={() => fetchRoadmap()}
@@ -112,14 +112,14 @@ export default function RoadmapView({ courseId, userRole, onStepSelect, course =
 
   return (
     <>
-      <div className="bg-white rounded-2xl shadow p-4">
+      <div className="bg-gray-800 border border-gray-700 rounded-xl shadow-lg p-4">
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <input
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Course title"
-            className="flex-1 min-w-[200px] px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="flex-1 min-w-[200px] px-3 py-2 border border-gray-700 bg-gray-900 text-white placeholder:text-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           {canGenerate && (
             <button
@@ -135,7 +135,7 @@ export default function RoadmapView({ courseId, userRole, onStepSelect, course =
               type="button"
               onClick={handleRegenerate}
               disabled={regenerating}
-              className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              className="px-4 py-2 border border-gray-700 rounded-lg hover:bg-gray-700/50 disabled:opacity-50"
             >
               {regenerating ? 'Regenerating...' : 'Regenerate'}
             </button>
@@ -143,7 +143,7 @@ export default function RoadmapView({ courseId, userRole, onStepSelect, course =
         </div>
 
         {!roadmap ? (
-          <p className="text-gray-500 py-6 text-center">
+          <p className="text-gray-400 py-6 text-center">
             No roadmap yet. Click Generate to create one, or ask your mentor to create it.
           </p>
         ) : (

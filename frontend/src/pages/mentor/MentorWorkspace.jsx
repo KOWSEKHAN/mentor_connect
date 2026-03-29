@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../../utils/auth'
 import Header from '../../components/Header'
@@ -12,38 +12,42 @@ import api from '../../utils/api'
 import { showToast } from '../../components/Toast'
 
 export default function MentorWorkspace () {
-  const { menteeId } = useParams()
+  const { mentorshipId } = useParams()
   const navigate = useNavigate()
   const { user } = useAuth()
   const [workspace, setWorkspace] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const fetchSeq = useRef(0)
 
   const fetchWorkspace = async () => {
-    if (!menteeId) return
+    if (!mentorshipId) return
+    const seq = ++fetchSeq.current
     setLoading(true)
     setError('')
     try {
-      const res = await api.get(`/api/mentor/mentee/${menteeId}`)
+      const res = await api.get(`/api/mentor/mentorship/${mentorshipId}`)
+      if (seq !== fetchSeq.current) return
       setWorkspace(res.data || null)
     } catch (err) {
       console.error(err)
       const msg = err.response?.data?.message || 'Failed to load mentee workspace'
+      if (seq !== fetchSeq.current) return
       setError(msg)
       showToast(msg, 'error')
     } finally {
-      setLoading(false)
+      if (seq === fetchSeq.current) setLoading(false)
     }
   }
 
   useEffect(() => {
     fetchWorkspace()
-  }, [menteeId])
+  }, [mentorshipId])
 
   const mentee = workspace?.mentee
   const course = workspace?.course || { mentee: workspace?.mentee, mentor: user }
   const courseId = course?._id || workspace?.courseId
-  const mentorshipId = workspace?.mentorship?._id || workspace?.mentorshipId
+  const chatMentorshipId = workspace?._id || workspace?.mentorship?._id || workspace?.mentorshipId || mentorshipId
   const notes = workspace?.notes || course?.notes || 'No notes available yet.'
   const progress = workspace?.progress ?? course?.progress ?? 0
   const [selectedStep, setSelectedStep] = useState(null)
@@ -68,16 +72,24 @@ export default function MentorWorkspace () {
       )
     }
 
-    if (error || !mentee) {
+    if (error) {
       return (
         <div className='text-center py-16 text-slate-400'>
-          <p>{error || 'Workspace not found.'}</p>
+          <p>{error}</p>
           <button
             onClick={() => navigate('/mentor')}
             className='mt-4 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700'
           >
             Back to Dashboard
           </button>
+        </div>
+      )
+    }
+
+    if (!mentee) {
+      return (
+        <div className='text-center py-16 text-slate-400'>
+          <p>Loading mentee...</p>
         </div>
       )
     }
@@ -137,7 +149,7 @@ export default function MentorWorkspace () {
             <div className="h-96 p-4">
               <ChatBox
                 course={course}
-                mentorshipId={mentorshipId}
+                mentorshipId={chatMentorshipId}
                 userId={user._id || user.id}
                 userName={user.name}
               />
@@ -179,7 +191,7 @@ export default function MentorWorkspace () {
     <>
       <Header />
       <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800">
-        <main className='max-w-[1400px] mx-auto w-full p-8'>
+        <main className='w-full min-h-screen px-6 py-4'>
           {renderContent()}
         </main>
       </div>

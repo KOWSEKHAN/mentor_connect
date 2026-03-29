@@ -15,6 +15,7 @@ const userSchema = new mongoose.Schema({
   resumeURL: { type: String },
   extractedSkills: { type: [String], default: [] },
   lastSeen: { type: Date },
+  points: { type: Number, default: 0, min: 0 },
   createdAt: { type: Date, default: Date.now }
 })
 

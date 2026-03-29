@@ -33,12 +33,6 @@ export default function CommunityChat() {
   }, [resetUnread]);
 
   useEffect(() => {
-    if (!courseId) return
-    console.log('Joining community room:', courseId)
-    socket.emit('joinCommunityRoom', { courseId })
-  }, [courseId])
-
-  useEffect(() => {
     api.get('/api/community/messages')
       .then((res) => setMessages(res.data?.messages || []))
       .catch(() => setMessages([]))
@@ -48,7 +42,6 @@ export default function CommunityChat() {
   useEffect(() => {
     const joinCommunity = () => {
       if (communityJoinedRef.current || !courseId) return;
-      console.log('Joining community room:', courseId);
       communityJoinedRef.current = true;
       socket.emit('joinCommunityRoom', { courseId });
     };
@@ -65,7 +58,6 @@ export default function CommunityChat() {
 
   useEffect(() => {
     const handleMessage = (msg) => {
-      console.log('Community message received:', msg);
       setMessages((prev) => {
         if (prev.some((m) => String(m._id) === String(msg._id))) return prev;
         return [...prev, msg];
@@ -145,13 +137,9 @@ export default function CommunityChat() {
   const handleSend = useCallback(() => {
     const text = input.trim();
     if (!text || !currentUserId || !courseId) return;
-    console.log('Sending community message:', text);
     setShowEmoji(false);
     socket.emit('sendCommunityMessage', {
       courseId,
-      senderId: currentUserId,
-      senderName: user?.name,
-      senderRole: user?.role,
       text,
     });
     setMessages((prev) => [
@@ -171,18 +159,18 @@ export default function CommunityChat() {
       clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = null;
     }
-    socket.emit('community_stop_typing');
+    socket.emit('community_stop_typing', { courseId });
   }, [input, currentUserId, courseId, user?.name, user?.role]);
 
   const handleInputChange = useCallback((e) => {
     setInput(e.target.value);
-    if (e.target.value.trim()) socket.emit('community_typing');
+    if (e.target.value.trim()) socket.emit('community_typing', { courseId });
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => {
-      socket.emit('community_stop_typing');
+      socket.emit('community_stop_typing', { courseId });
       typingTimeoutRef.current = null;
     }, 1200);
-  }, []);
+  }, [courseId]);
 
   const handleEmojiClick = useCallback((emojiData) => {
     const emoji = emojiData?.emoji || '';
@@ -190,9 +178,9 @@ export default function CommunityChat() {
   }, []);
 
   const handleReaction = useCallback((messageId, emoji) => {
-    socket.emit('community_reaction', { messageId, emoji });
+    socket.emit('community_reaction', { messageId, emoji, courseId: courseId || undefined });
     setMenuMessageId(null);
-  }, []);
+  }, [courseId]);
 
   const handleEdit = useCallback((msg) => {
     setEditMessageId(msg._id);
@@ -202,10 +190,10 @@ export default function CommunityChat() {
 
   const handleSaveEdit = useCallback(() => {
     if (!editMessageId || !editText.trim()) return;
-    socket.emit('community_message_edit', { messageId: editMessageId, message: editText.trim() });
+    socket.emit('community_message_edit', { messageId: editMessageId, message: editText.trim(), courseId: courseId || undefined });
     setEditMessageId(null);
     setEditText('');
-  }, [editMessageId, editText]);
+  }, [editMessageId, editText, courseId]);
 
   const handleCancelEdit = useCallback(() => {
     setEditMessageId(null);
@@ -213,8 +201,8 @@ export default function CommunityChat() {
   }, []);
 
   const handleDelete = useCallback((messageId) => {
-    socket.emit('community_message_delete', messageId);
-  }, []);
+    socket.emit('community_message_delete', { messageId, courseId: courseId || undefined });
+  }, [courseId]);
 
   const handleBack = useCallback(() => {
     navigate(user?.role === 'mentor' ? '/mentor' : '/mentee');

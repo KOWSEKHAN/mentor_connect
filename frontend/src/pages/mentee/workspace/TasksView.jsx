@@ -47,9 +47,9 @@ export default function TasksView({ course, updateCourse, refreshCourse }) {
   }
 
   return (
-    <div className="bg-white rounded-2xl shadow p-6 h-full overflow-auto">
+    <div className="bg-gray-800 border border-gray-700 rounded-xl shadow-lg p-6 h-full overflow-auto text-gray-300">
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-xl font-semibold">Tasks</h3>
+        <h3 className="text-xl font-semibold text-white">Tasks</h3>
         <button
           onClick={addTask}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
@@ -60,12 +60,12 @@ export default function TasksView({ course, updateCourse, refreshCourse }) {
 
       <div className="space-y-3">
         {tasks.length === 0 ? (
-          <p className="text-gray-500 text-center py-8">No tasks yet. Add one to get started!</p>
+          <p className="text-gray-400 text-center py-8">No tasks yet. Add one to get started!</p>
         ) : (
           tasks.map((task, index) => (
             <div
               key={index}
-              className="flex items-center p-4 border rounded-lg hover:bg-gray-50"
+              className="flex items-center p-4 border border-gray-700 rounded-lg hover:bg-gray-700/50"
             >
               <input
                 type="checkbox"
@@ -75,14 +75,14 @@ export default function TasksView({ course, updateCourse, refreshCourse }) {
               />
               <span
                 className={`ml-3 flex-1 ${
-                  task.completed ? 'line-through text-gray-500' : 'text-gray-900'
+                  task.completed ? 'line-through text-gray-400' : 'text-gray-200'
                 }`}
               >
                 {task.title}
               </span>
               <button
                 onClick={() => deleteTask(index)}
-                className="ml-2 text-red-600 hover:text-red-800"
+                className="ml-2 text-red-400 hover:text-red-300"
               >
                 Delete
               </button>

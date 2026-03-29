@@ -5,7 +5,8 @@ export default function Sidebar({ activeTab, setActiveTab }) {
     { id: 'roadmap', label: 'Roadmap' },
     { id: 'tasks', label: 'Tasks' },
     { id: 'notes', label: 'Notes' },
-    { id: 'ask-ai', label: 'Ask AI' }
+    { id: 'certificate', label: 'Certificate' },
+    { id: 'chat', label: 'Chat with Mentor' }
   ]
 
   return (

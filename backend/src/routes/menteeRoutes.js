@@ -1,6 +1,6 @@
 import express from 'express';
 import { protect, requireRole } from '../middleware/auth.js';
-import { getRecommendations } from '../controllers/menteeController.js';
+import { getRecommendations, getMenteeCourses } from '../controllers/menteeController.js';
 
 const router = express.Router();
 
@@ -12,6 +12,9 @@ router.get('/test', (req, res) => {
 
 // GET /api/mentee/recommendations
 router.get('/recommendations', protect, requireRole('mentee'), getRecommendations);
+
+// GET /api/mentee/courses - mentee's courses backed by accepted mentorships
+router.get('/courses', protect, requireRole('mentee'), getMenteeCourses);
 
 export default router;
 

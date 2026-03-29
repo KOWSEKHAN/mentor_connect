@@ -1,6 +1,7 @@
 // backend/src/controllers/messageController.js
 import Message from '../models/Message.js';
 import User from '../models/User.js';
+import Mentorship from '../models/Mentorship.js';
 
 /**
  * Get message history for a mentorship
@@ -19,6 +20,18 @@ export const getMessagesByMentorship = async (req, res) => {
     const mongoose = (await import('mongoose')).default
     if (!mongoose.Types.ObjectId.isValid(mentorshipId)) {
       return res.status(400).json({ message: 'Invalid mentorshipId format' });
+    }
+
+    const mentorship = await Mentorship.findById(mentorshipId).select('mentorId menteeId').lean();
+    if (!mentorship) {
+      return res.status(404).json({ message: 'Mentorship not found' });
+    }
+
+    const requestUserId = String(userId);
+    const mentorId = mentorship.mentorId?.toString?.() || String(mentorship.mentorId || '');
+    const menteeId = mentorship.menteeId?.toString?.() || String(mentorship.menteeId || '');
+    if (requestUserId !== mentorId && requestUserId !== menteeId) {
+      return res.status(403).json({ message: 'Not authorized to view these messages' });
     }
 
     // Fetch messages

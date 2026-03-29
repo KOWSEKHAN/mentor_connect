@@ -92,9 +92,9 @@ export default function AIContentView({
   }, [content])
 
   return (
-    <div className="bg-white rounded-2xl shadow p-6 h-full flex flex-col">
+    <div className="bg-gray-800 border border-gray-700 rounded-xl shadow-lg p-6 h-full flex flex-col text-gray-300">
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-xl font-semibold">AI Content</h3>
+        <h3 className="text-xl font-semibold text-white">AI Content</h3>
         <div className="space-x-2">
           <button
             onClick={handleGenerate}
@@ -108,7 +108,7 @@ export default function AIContentView({
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                className="px-4 py-2 border border-gray-700 rounded-lg hover:bg-gray-700/50 disabled:opacity-50"
               >
                 {saving ? 'Saving...' : 'Save'}
               </button>
@@ -121,7 +121,7 @@ export default function AIContentView({
         value={content}
         onChange={(e) => setContent(e.target.value)}
         placeholder="AI-generated learning content will appear here. Generate content from a roadmap step or use Regenerate."
-        className="flex-1 w-full p-4 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none min-h-[120px]"
+        className="flex-1 w-full p-4 border border-gray-700 bg-gray-900 rounded-lg text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none min-h-[120px]"
       />
     </div>
   )

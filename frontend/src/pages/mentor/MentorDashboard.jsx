@@ -33,7 +33,7 @@ const STATS_CONFIG = [
 ]
 
 export default function MentorDashboard () {
-  const { user } = useAuth()
+  const { user, updateUser } = useAuth()
   const navigate = useNavigate()
 
   const [stats, setStats] = useState({ active: 0, completed: 0, pending: 0 })
@@ -71,8 +71,8 @@ export default function MentorDashboard () {
     setLoading(prev => ({ ...prev, mentees: true }))
     try {
       // Use /api/mentorships/mentor endpoint (single source of truth)
-      const res = await api.get('/api/mentorships/mentor?status=all')
-      const menteeList = res.data.mentees || []
+      const res = await api.get('/api/mentorships/mentor')
+      const menteeList = res.data.mentorships || []
       setMentees(menteeList)
       updateStatsCounts(menteeList, 'mentees')
     } catch (err) {
@@ -92,6 +92,20 @@ export default function MentorDashboard () {
     refreshDashboard()
   }, [refreshDashboard])
 
+  useEffect(() => {
+    let cancelled = false
+    api
+      .get('/api/points/summary')
+      .then((res) => {
+        if (cancelled) return
+        updateUser?.({ points: res.data?.balance ?? 0 })
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const handleRequestAction = async (requestId, action) => {
     try {
       setActionLoading(`${requestId}-${action}`)
@@ -110,12 +124,12 @@ export default function MentorDashboard () {
   }
 
   const handleOpenMentee = mentorship => {
-    const menteeId = mentorship.mentee?._id || mentorship.mentee
-    if (!menteeId) {
-      showToast('Unable to open workspace — missing mentee id', 'error')
+    const mentorshipId = mentorship._id
+    if (!mentorshipId) {
+      showToast('Unable to open workspace — missing mentorship id', 'error')
       return
     }
-    navigate(`/mentor/workspace/${menteeId}`)
+    navigate(`/mentor/workspace/${mentorshipId}`)
   }
 
   const hasPendingRequests = pendingRequests.length > 0
@@ -126,7 +140,7 @@ export default function MentorDashboard () {
       <Header />
       <div className="flex min-h-screen">
         <AppSidebar userRole="mentor" />
-        <main className="flex-1 p-6 w-full max-w-[1400px] mx-auto">
+        <main className="flex-1 w-full min-h-screen px-6 py-4">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -148,20 +162,31 @@ export default function MentorDashboard () {
               </div>
             ))
           ) : (
-            STATS_CONFIG.map(stat => (
-              <div
-                key={stat.key}
-                className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 flex items-center gap-4 hover:scale-[1.02] transition-all duration-200 shadow-xl"
-              >
-                <div className="w-12 h-12 rounded-xl bg-slate-700/80 flex items-center justify-center text-2xl">
-                  {stat.icon}
+            <>
+              {STATS_CONFIG.map(stat => (
+                <div
+                  key={stat.key}
+                  className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 flex items-center gap-4 hover:scale-[1.02] transition-all duration-200 shadow-xl"
+                >
+                  <div className="w-12 h-12 rounded-xl bg-slate-700/80 flex items-center justify-center text-2xl">
+                    {stat.icon}
+                  </div>
+                  <div>
+                    <p className="text-sm text-slate-400">{stat.label}</p>
+                    <p className="text-3xl font-semibold text-white">{stats[stat.key]}</p>
+                  </div>
+                </div>
+              ))}
+              <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 flex items-center gap-4 hover:scale-[1.02] transition-all duration-200 shadow-xl">
+                <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center text-2xl">
+                  ⭐
                 </div>
                 <div>
-                  <p className="text-sm text-slate-400">{stat.label}</p>
-                  <p className="text-3xl font-semibold text-white">{stats[stat.key]}</p>
+                  <p className="text-sm text-slate-400">Points balance</p>
+                  <p className="text-3xl font-semibold text-amber-300 tabular-nums">{user?.points ?? 0}</p>
                 </div>
               </div>
-            ))
+            </>
           )}
         </section>
 

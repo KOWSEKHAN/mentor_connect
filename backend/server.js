@@ -11,9 +11,9 @@ import Mentorship from './src/models/Mentorship.js'
 
 dotenv.config()
 const JWT_SECRET = process.env.JWT_SECRET || 'please_change_this_secret'
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173'
 
 import authRoutes from './src/routes/authRoutes.js'
-import mentorRequestRoutes from './src/routes/mentorRequestRoutes.js'
 import mentorshipRoutes from './src/routes/mentorshipRoutes.js'
 import courseRoutes from './src/routes/courseRoutes.js'
 import mentorRoutes from './src/routes/mentorRoutes.js'
@@ -25,13 +25,16 @@ import messageRoutes from './src/routes/messageRoutes.js'
 import roadmapRoutes from './src/routes/roadmapRoutes.js'
 import roadmapRoutesV2 from './src/routes/roadmapRoutesV2.js'
 import communityRoutes from './src/routes/communityRoutes.js'
+import reviewRoutes from './src/routes/reviewRoutes.js'
+import certificateRoutes from './src/routes/certificateRoutes.js'
+import pointRoutes from './src/routes/pointRoutes.js'
 
 const app = express()
 const httpServer = createServer(app)
 
 const io = new Server(httpServer, {
   cors: {
-    origin: 'http://localhost:5173',
+    origin: CLIENT_ORIGIN,
     methods: ['GET', 'POST'],
     credentials: true,
     allowEIO3: true
@@ -42,7 +45,7 @@ const io = new Server(httpServer, {
 })
 
 app.use(cors({
-  origin: 'http://localhost:5173',
+  origin: CLIENT_ORIGIN,
   credentials: true
 }))
 app.use(express.json())
@@ -52,7 +55,6 @@ app.use('/uploads', express.static('uploads'))
 connectDB()
 
 app.use('/api/auth', authRoutes)
-app.use('/api/mentorship', mentorRequestRoutes)
 app.use('/api/mentorship', mentorshipRoutes)
 app.use('/api/mentorships', mentorshipRoutes)
 app.use('/api/courses', courseRoutes)
@@ -67,6 +69,10 @@ app.use('/api/messages', messageRoutes)
 app.use('/api/roadmaps', roadmapRoutes)
 app.use('/api/roadmap', roadmapRoutesV2)
 app.use('/api/community', communityRoutes)
+app.use('/api/reviews', reviewRoutes)
+app.use('/api/review', reviewRoutes)
+app.use('/api/certificate', certificateRoutes)
+app.use('/api/points', pointRoutes)
 
 app.get('/', (req, res) => res.send('MentorConnect Backend is running'))
 
@@ -77,6 +83,17 @@ const getRoomName = (mentorshipId) =>
   String(mentorshipId).startsWith('mentorship_')
     ? mentorshipId
     : `mentorship_${mentorshipId}`
+const getCommunityRoomName = (courseId) => `community_${courseId || 'global'}`
+
+const isMentorshipMember = async (mentorshipId, userId) => {
+  if (!mentorshipId || !userId) return false
+  const mongoose = (await import('mongoose')).default
+  if (!mongoose.Types.ObjectId.isValid(mentorshipId)) return false
+  const ms = await Mentorship.findById(mentorshipId).select('mentorId menteeId').lean()
+  if (!ms) return false
+  const uid = String(userId)
+  return uid === String(ms.mentorId) || uid === String(ms.menteeId)
+}
 
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token
@@ -91,7 +108,12 @@ io.use((socket, next) => {
     socket.userId = (decoded.id?.toString?.() || decoded.id)
     socket.user = decoded
   } catch (err) {
-    console.warn('Socket auth decode failed:', err.message)
+    console.warn('Socket auth decode failed:', {
+      message: err.message,
+      hasEnvSecret: Boolean(process.env.JWT_SECRET),
+      tokenLen: String(token).length,
+      tokenPrefix: String(token).slice(0, 16),
+    })
     socket.user = { role: 'guest' }
   }
 
@@ -109,17 +131,27 @@ io.on('connection', (socket) => {
   }
   socket.emit('connected', { status: 'connected' })
 
-  socket.on('joinRoom', ({ mentorshipId }) => {
-    if (!mentorshipId) return
+  socket.on('joinRoom', async (payload = {}) => {
+    const { mentorshipId } = payload
+    if (!mentorshipId || !socket.userId) return
+    if (!(await isMentorshipMember(mentorshipId, socket.userId))) {
+      socket.emit('error', { message: 'Not authorized for this mentorship room' })
+      return
+    }
     const roomName = getRoomName(mentorshipId)
     socket.join(roomName)
     socket.emit('joined_chat', { mentorshipId, room: roomName })
   })
 
-  socket.on('join_chat', ({ mentorshipId, chatId }) => {
+  socket.on('join_chat', async (payload = {}) => {
+    const { mentorshipId, chatId } = payload
     const id = mentorshipId || chatId
-    if (!id) {
+    if (!id || !socket.userId) {
       socket.emit('error', { message: 'mentorshipId is required' })
+      return
+    }
+    if (!(await isMentorshipMember(id, socket.userId))) {
+      socket.emit('error', { message: 'Not authorized for this mentorship room' })
       return
     }
     const roomName = getRoomName(id)
@@ -128,7 +160,8 @@ io.on('connection', (socket) => {
     console.log(`Socket ${socket.id} joined room: ${roomName}`)
   })
 
-  socket.on('leave_chat', ({ mentorshipId, chatId }) => {
+  socket.on('leave_chat', (payload = {}) => {
+    const { mentorshipId, chatId } = payload
     const id = mentorshipId || chatId
     if (!id) return
     const roomName = getRoomName(id)
@@ -137,12 +170,18 @@ io.on('connection', (socket) => {
   })
 
   socket.on('send_message', async (data) => {
-    const { mentorshipId, chatId, senderId, senderRole, text } = data
-    const mentId = mentorshipId || chatId
+    const payload = data || {}
+    const { mentorshipId, receiverId, content } = payload
+    const mentId = mentorshipId
 
     try {
-      if (!mentId || !senderId || !senderRole || !text) {
+      if (!mentId || !content || !receiverId) {
+        console.error('Invalid message payload:', payload)
         socket.emit('error', { message: 'Missing required fields' })
+        return
+      }
+      if (!socket.userId) {
+        socket.emit('error', { message: 'Not authorized' })
         return
       }
 
@@ -152,23 +191,38 @@ io.on('connection', (socket) => {
         return
       }
 
+      const mentorship = await Mentorship.findById(mentId).select('mentorId menteeId').lean()
+      if (!mentorship) {
+        socket.emit('error', { message: 'Mentorship not found' })
+        return
+      }
+
+      const senderId = String(socket.userId)
+      const mentorIdStr = String(mentorship.mentorId)
+      const menteeIdStr = String(mentorship.menteeId)
+      const isMember = senderId === mentorIdStr || senderId === menteeIdStr
+      if (!isMember) {
+        socket.emit('error', { message: 'Not authorized to send in this mentorship' })
+        return
+      }
+
+      const expectedReceiverId = senderId === mentorIdStr ? menteeIdStr : mentorIdStr
+      if (String(receiverId) !== expectedReceiverId) {
+        socket.emit('error', { message: 'Invalid receiver for mentorship' })
+        return
+      }
+
       const sender = await User.findById(senderId).select('name')
       const senderName = sender?.name || 'Unknown'
-
-      const mentorship = await Mentorship.findById(mentId).select('mentor mentee').lean()
-      const recipientId = mentorship
-        ? (mentorship.mentor.toString() === (senderId?.toString?.() || senderId)
-          ? mentorship.mentee
-          : mentorship.mentor)
-        : null
+      const senderRole = senderId === mentorIdStr ? 'mentor' : 'mentee'
 
       const msg = await Message.create({
         mentorshipId: mentId,
         senderId,
         senderRole,
-        text: text.trim(),
+        text: String(content).trim(),
         status: 'sent',
-        deliveredTo: recipientId ? [recipientId] : [],
+        deliveredTo: [expectedReceiverId],
         readBy: []
       })
 
@@ -191,16 +245,6 @@ io.on('connection', (socket) => {
 
       io.to(roomName).emit('receive_message', formattedMessage)
 
-      msg.status = 'delivered'
-      if (recipientId) msg.deliveredTo = [recipientId]
-      await msg.save()
-
-      io.to(roomName).emit('message_delivered', {
-        messageId: msg._id,
-        status: 'delivered',
-        deliveredTo: recipientId ? [recipientId] : []
-      })
-
       console.log(`Message ${msg._id} sent in room ${roomName} by ${senderName}`)
     } catch (err) {
       console.error('Error handling send_message:', err)
@@ -208,32 +252,66 @@ io.on('connection', (socket) => {
     }
   })
 
-  socket.on('typing', ({ chatId, mentorshipId, userId }) => {
+  socket.on('message_delivered_ack', async (payload = {}) => {
+    const { messageId, mentorshipId } = payload
+    const uid = socket.userId
+    if (!uid || !messageId || !mentorshipId) return
+    try {
+      if (!(await isMentorshipMember(mentorshipId, uid))) return
+      const msg = await Message.findById(messageId)
+      if (!msg) return
+      if (String(msg.mentorshipId) !== String(mentorshipId)) return
+      if (String(msg.senderId) === String(uid)) return
+
+      await Message.findByIdAndUpdate(messageId, {
+        $addToSet: { deliveredTo: uid },
+        $set: { status: 'delivered' },
+      })
+
+      const roomName = getRoomName(mentorshipId)
+      io.to(roomName).emit('message_delivered', {
+        messageId,
+        status: 'delivered',
+        deliveredTo: [uid],
+      })
+    } catch (err) {
+      console.error('message_delivered_ack failed:', err.message)
+    }
+  })
+
+  socket.on('typing', (payload = {}) => {
+    const { chatId, mentorshipId } = payload
+    const userId = socket.userId
     const id = mentorshipId || chatId
-    if (!id) return
+    if (!id || !userId) return
     const roomName = getRoomName(id)
     socket.to(roomName).emit('user_typing', userId)
     socket.to(roomName).emit('typing', userId)
   })
 
-  socket.on('stop_typing', ({ chatId, mentorshipId, userId }) => {
+  socket.on('stop_typing', (payload = {}) => {
+    const { chatId, mentorshipId } = payload
+    const userId = socket.userId
     const id = mentorshipId || chatId
-    if (!id) return
+    if (!id || !userId) return
     const roomName = getRoomName(id)
     socket.to(roomName).emit('user_stop_typing', userId)
     socket.to(roomName).emit('stop_typing', userId)
   })
 
-  socket.on('message_seen', async ({ chatId, mentorshipId, userId }) => {
+  socket.on('message_seen', async (payload = {}) => {
+    const { chatId, mentorshipId } = payload
     const mentId = mentorshipId || chatId
-    if (!mentId || !userId) return
+    const uid = socket.userId
+    if (!mentId || !uid) return
+    if (!(await isMentorshipMember(mentId, uid))) return
 
     try {
       const mongoose = (await import('mongoose')).default
       if (!mongoose.Types.ObjectId.isValid(mentId)) return
 
       await Message.updateMany(
-        { mentorshipId: mentId, senderId: { $ne: userId } },
+        { mentorshipId: mentId, senderId: { $ne: uid } },
         { $set: { status: 'seen' } }
       )
 
@@ -244,21 +322,19 @@ io.on('connection', (socket) => {
     }
   })
 
-  socket.on('joinCommunityRoom', ({ courseId }) => {
-    if (!courseId) {
-      console.warn('Community room join missing courseId')
-      return
-    }
-    const room = `community_${courseId}`
+  socket.on('joinCommunityRoom', (payload = {}) => {
+    const { courseId } = payload
+    socket.data.communityCourseId = courseId || 'global'
+    const room = getCommunityRoomName(courseId)
     socket.join(room)
     console.log(`Socket ${socket.id} joined ${room}`)
   })
 
   socket.on('sendCommunityMessage', async (data) => {
     try {
-      console.log('Community message received:', data)
-      const { courseId, senderId, senderName, senderRole, text } = data
-      if (!courseId || !text) {
+      const uid = socket.userId
+      const { courseId, text } = data || {}
+      if (!uid || !text) {
         console.warn('Invalid community message payload')
         return
       }
@@ -266,15 +342,17 @@ io.on('connection', (socket) => {
       const CommunityMessage = (await import('./src/models/CommunityMessage.js')).default
       const mongoose = (await import('mongoose')).default
       const trimmed = String(text).trim().slice(0, 5000)
-      const room = `community_${courseId}`
+      const room = getCommunityRoomName(courseId)
+      const sender = await User.findById(uid).select('name role').lean()
+      if (!sender) return
 
       const createPayload = {
-        senderId,
-        senderName,
-        senderRole: senderRole === 'mentor' || senderRole === 'mentee' ? senderRole : 'mentee',
+        senderId: uid,
+        senderName: sender.name || 'Unknown',
+        senderRole: sender.role === 'mentor' ? 'mentor' : 'mentee',
         message: trimmed,
       }
-      if (mongoose.Types.ObjectId.isValid(courseId) && String(new mongoose.Types.ObjectId(courseId)) === courseId) {
+      if (courseId && mongoose.Types.ObjectId.isValid(courseId) && String(new mongoose.Types.ObjectId(courseId)) === courseId) {
         createPayload.courseId = courseId
       }
 
@@ -298,19 +376,25 @@ io.on('connection', (socket) => {
     }
   })
 
-  socket.on('community_typing', () => {
+  socket.on('community_typing', (payload = {}) => {
+    const { courseId } = payload
     const uid = socket.userId
     if (!uid) return
-    socket.to('community').emit('community_typing', {
+    if (courseId) socket.data.communityCourseId = courseId
+    const room = getCommunityRoomName(courseId || socket.data?.communityCourseId)
+    socket.to(room).emit('community_typing', {
       userId: uid,
       name: socket.userName || 'Someone',
     })
   })
 
-  socket.on('community_stop_typing', () => {
+  socket.on('community_stop_typing', (payload = {}) => {
+    const { courseId } = payload
     const uid = socket.userId
     if (!uid) return
-    socket.to('community').emit('community_stop_typing', { userId: uid })
+    if (courseId) socket.data.communityCourseId = courseId
+    const room = getCommunityRoomName(courseId || socket.data?.communityCourseId)
+    socket.to(room).emit('community_stop_typing', { userId: uid })
   })
 
   socket.on('community_message_edit', async (data) => {
@@ -339,14 +423,16 @@ io.on('connection', (socket) => {
         reactions: msg.reactions || [],
         createdAt: msg.createdAt,
       }
-      io.to('community').emit('community_message_edit', payload)
+      const room = getCommunityRoomName(msg.courseId?.toString?.() || data?.courseId)
+      io.to(room).emit('community_message_edit', payload)
     } catch (err) {
       console.error('community_message_edit failed:', err)
       socket.emit('error', { message: 'Failed to edit message' })
     }
   })
 
-  socket.on('community_message_delete', async (messageId) => {
+  socket.on('community_message_delete', async (payload = {}) => {
+    const { messageId, courseId } = payload
     const uid = socket.userId
     if (!uid || !messageId) return
     try {
@@ -358,7 +444,8 @@ io.on('connection', (socket) => {
       }
       msg.deleted = true
       await msg.save()
-      io.to('community').emit('community_message_delete', { messageId: msg._id })
+      const room = getCommunityRoomName(msg.courseId?.toString?.() || courseId)
+      io.to(room).emit('community_message_delete', { messageId: msg._id })
     } catch (err) {
       console.error('community_message_delete failed:', err)
       socket.emit('error', { message: 'Failed to delete message' })
@@ -400,22 +487,26 @@ io.on('connection', (socket) => {
         reactions: msg.reactions || [],
         createdAt: msg.createdAt,
       }
-      io.to('community').emit('community_reaction', payload)
+      const room = getCommunityRoomName(msg.courseId?.toString?.() || data?.courseId)
+      io.to(room).emit('community_reaction', payload)
     } catch (err) {
       console.error('community_reaction failed:', err)
       socket.emit('error', { message: 'Failed to update reaction' })
     }
   })
 
-  socket.on('message_read', async ({ messageId, userId }) => {
-    if (!messageId || !userId) return
+  socket.on('message_read', async (payload = {}) => {
+    const { messageId } = payload
+    const uid = socket.userId
+    if (!messageId || !uid) return
     try {
       const msg = await Message.findById(messageId)
       if (!msg) return
       const mentId = msg.mentorshipId.toString()
+      if (!(await isMentorshipMember(mentId, uid))) return
       const roomName = getRoomName(mentId)
-      await Message.findByIdAndUpdate(messageId, { $addToSet: { readBy: userId } })
-      io.to(roomName).emit('message_read_update', { messageId, userId })
+      await Message.findByIdAndUpdate(messageId, { $addToSet: { readBy: uid } })
+      io.to(roomName).emit('message_read_update', { messageId, userId: uid })
     } catch (err) {
       console.error('message_read failed:', err.message)
     }
@@ -432,7 +523,8 @@ io.on('connection', (socket) => {
         console.error('lastSeen update failed:', e.message)
       }
       io.emit('user_offline', uid)
-      io.to('community').emit(
+      const room = getCommunityRoomName(socket.data?.communityCourseId)
+      io.to(room).emit(
         'community_users_online',
         Array.from(onlineCommunityUsers.values())
       )

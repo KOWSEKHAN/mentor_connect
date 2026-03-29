@@ -1,5 +1,6 @@
 // backend/src/controllers/mentorController.js
 import User from '../models/User.js';
+import Review from '../models/Review.js';
 
 /**
  * Search/recommend mentors by domain
@@ -60,12 +61,39 @@ export const getAllMentors = async (req, res) => {
       .select('name email createdAt')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(limit);
+      .limit(limit)
+      .lean();
+
+    const reviewAgg = await Review.aggregate([
+      {
+        $group: {
+          _id: '$mentorId',
+          avgRating: { $avg: '$rating' },
+          totalReviews: { $sum: 1 },
+        },
+      },
+    ]);
+    const aggMap = {};
+    for (const row of reviewAgg) {
+      aggMap[row._id.toString()] = {
+        rating: Number.isFinite(row.avgRating) ? Math.round(row.avgRating * 10) / 10 : 0,
+        totalReviews: row.totalReviews || 0,
+      };
+    }
+
+    const mentorsWithRatings = mentors.map((m) => {
+      const agg = aggMap[m._id.toString()] || { rating: 0, totalReviews: 0 };
+      return {
+        ...m,
+        rating: agg.rating,
+        totalReviews: agg.totalReviews,
+      };
+    });
 
     const totalPages = Math.ceil(total / limit);
 
     return res.json({
-      mentors,
+      mentors: mentorsWithRatings,
       pagination: {
         total,
         page,
@@ -73,6 +101,59 @@ export const getAllMentors = async (req, res) => {
         totalPages
       }
     });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
+/**
+ * Mentee-facing mentor discovery.
+ * GET /api/mentors
+ *
+ * Returns:
+ * - name
+ * - mentor_id
+ * - rating (avg)
+ * - totalReviews
+ */
+export const getMentors = async (req, res) => {
+  try {
+    const mentors = await User.find({ role: 'mentor' })
+      .select('_id name createdAt')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const reviewAgg = await Review.aggregate([
+      {
+        $group: {
+          _id: '$mentorId',
+          avgRating: { $avg: '$rating' },
+          totalReviews: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const aggMap = {};
+    for (const row of reviewAgg) {
+      const key = row._id.toString();
+      aggMap[key] = {
+        rating: Number.isFinite(row.avgRating) ? Math.round(row.avgRating * 10) / 10 : 0,
+        totalReviews: row.totalReviews || 0,
+      };
+    }
+
+    const results = mentors.map((m) => {
+      const agg = aggMap[m._id.toString()] || { rating: 0, totalReviews: 0 };
+      return {
+        mentor_id: m._id.toString(),
+        name: m.name,
+        rating: agg.rating,
+        totalReviews: agg.totalReviews,
+      };
+    });
+
+    return res.json({ mentors: results });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Server error' });
@@ -94,16 +175,17 @@ export const getMenteeWorkspace = async (req, res) => {
 
     const mentee = await User.findById(menteeId).select('-password');
     if (!mentee || mentee.role !== 'mentee') {
+      console.log('[mentorWorkspace] byMentee:menteeNotFound', { menteeId });
       return res.status(404).json({ success: false, message: 'Mentee not found' });
     }
 
     // Find active mentorship
     const Mentorship = (await import('../models/Mentorship.js')).default;
-    const mentorship = await Mentorship.findOne({
-      mentor: mentorId,
-      mentee: menteeId,
-      status: 'active'
-    }).populate('mentee', 'name email').populate('mentor', 'name email');
+    let mentorship = await Mentorship.findOne({
+      mentorId,
+      menteeId,
+      status: 'accepted'
+    }).populate('menteeId', 'name email').populate('mentorId', 'name email');
 
     // Find course for this mentorship
     const Course = (await import('../models/Course.js')).default;
@@ -125,11 +207,65 @@ export const getMenteeWorkspace = async (req, res) => {
       course: course ? course.toObject() : null,
       notes: course?.notes || '',
       progress: mentorship?.progress || course?.progress || 0,
-      status: mentorship?.status || 'active'
+      status: mentorship?.status || null
     });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+/**
+ * Mentor workspace view by mentorship id (backward-compatible addition).
+ * GET /api/mentor/mentorship/:id
+ */
+export const getMentorshipDetails = async (req, res) => {
+  try {
+    const mentorId = req.user._id;
+    const { id } = req.params;
+
+    const Mentorship = (await import('../models/Mentorship.js')).default;
+    const Course = (await import('../models/Course.js')).default;
+
+    const mentorship = await Mentorship.findById(id)
+      .populate('menteeId', 'name email')
+      .populate('mentorId', 'name email');
+
+    if (!mentorship) {
+      return res.status(404).json({ message: 'Mentorship not found' });
+    }
+
+    if (String(mentorship.mentorId?._id || mentorship.mentorId) !== String(mentorId)) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+
+    const menteeUser = mentorship.menteeId?._id ? mentorship.menteeId : await User.findById(mentorship.menteeId).select('-password');
+    if (!menteeUser) {
+      console.log('[mentorWorkspace] byMentorship:menteeNotFound', {
+        mentee: mentorship.menteeId?.toString?.() || mentorship.menteeId,
+      });
+      return res.status(404).json({ message: 'Mentee not found' });
+    }
+
+    const course = await Course.findOne({
+      mentor: mentorship.mentorId?._id || mentorship.mentorId,
+      mentee: mentorship.menteeId?._id || mentorship.menteeId,
+    }).populate('mentor', 'name email').populate('mentee', 'name email');
+
+    return res.json({
+      success: true,
+      _id: mentorship._id,
+      mentor: mentorship.mentorId,
+      mentee: mentorship.menteeId,
+      status: mentorship.status,
+      domain: mentorship.domain,
+      progress: mentorship.progress ?? course?.progress ?? 0,
+      course: course ? course.toObject() : null,
+      notes: course?.notes || '',
+    });
+  } catch (err) {
+    console.error('getMentorshipDetails failed:', err);
+    return res.status(500).json({ message: 'Server error' });
   }
 };
 

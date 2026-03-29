@@ -2,10 +2,10 @@ import LevelBadge from './LevelBadge'
 import ProgressBar from './ProgressBar'
 
 const STATUS_STYLES = {
-  locked: 'bg-gray-50 border-gray-200 cursor-not-allowed opacity-75',
-  available: 'bg-blue-50 border-blue-200 hover:border-blue-400',
-  inProgress: 'bg-amber-50 border-amber-300 hover:border-amber-400',
-  completed: 'bg-green-50 border-green-200 hover:border-green-400',
+  locked: 'bg-gray-800/40 border-gray-700 cursor-not-allowed opacity-75',
+  available: 'bg-blue-600/10 border-blue-500/20 hover:border-blue-400/40',
+  inProgress: 'bg-amber-600/10 border-amber-500/20 hover:border-amber-400/40',
+  completed: 'bg-green-600/10 border-green-500/20 hover:border-green-400/40',
 }
 
 function getStatus(step, isLocked) {
@@ -35,14 +35,14 @@ export default function StepCard({ step, isSelected, isLocked, onClick }) {
       <div className="flex items-center justify-between gap-2 mb-2">
         <LevelBadge level={step.level} />
         {step.aiContentGenerated && (
-          <span className="text-xs text-gray-500" title="Content generated">✓</span>
+          <span className="text-xs text-gray-300" title="Content generated">✓</span>
         )}
       </div>
-      <h4 className="font-medium text-gray-900 truncate mb-2" title={step.title}>
+      <h4 className="font-medium text-white truncate mb-2" title={step.title}>
         {step.title}
       </h4>
       <ProgressBar progress={step.progress} />
-      <p className="text-xs text-gray-500 mt-2">
+      <p className="text-xs text-gray-300 mt-2">
         {status === 'completed' ? 'Completed' : status === 'inProgress' ? 'In progress' : 'Not started'}
       </p>
     </button>

@@ -85,6 +85,7 @@ export default function MentorshipChat({ course, mentorshipId, userId, userName 
   useEffect(() => {
     if (!mentorshipId) return;
     readSentForRef.current = new Set();
+    setLoading(true);
 
     api.get(`/api/messages/${mentorshipId}`)
       .then((res) => setMessages(res.data?.messages || []))
@@ -92,14 +93,18 @@ export default function MentorshipChat({ course, mentorshipId, userId, userName 
       .finally(() => setLoading(false));
 
     if (currentUserIdRef.current) {
-      socket.emit('message_seen', { mentorshipId, chatId: mentorshipId, userId: currentUserIdRef.current });
+      socket.emit('message_seen', { mentorshipId, chatId: mentorshipId });
     }
 
     const onReceive = (message) => {
+      const isOwnIncoming = String(message?.senderId) === String(currentUserIdRef.current);
       setMessages((prev) => {
         if (prev.some((m) => m._id === message._id)) return prev;
         return [...prev, { ...message, status: message.status || 'sent' }];
       });
+      if (!isOwnIncoming && message?._id) {
+        socket.emit('message_delivered_ack', { messageId: message._id, mentorshipId });
+      }
       setIsTyping(false);
     };
     const onDelivered = ({ messageId, status }) =>
@@ -156,12 +161,12 @@ export default function MentorshipChat({ course, mentorshipId, userId, userName 
     const messageText = input.trim();
     setInput('');
     const senderRole = mentorId && currentUserId === mentorId ? 'mentor' : 'mentee';
+    const receiverId = senderRole === 'mentee' ? mentorId : menteeId;
+    if (!receiverId) return;
     socket.emit('send_message', {
+      receiverId,
       mentorshipId,
-      chatId: mentorshipId,
-      senderId: currentUserId,
-      senderRole,
-      text: messageText,
+      content: messageText,
     });
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     setIsTyping(false);
@@ -171,10 +176,10 @@ export default function MentorshipChat({ course, mentorshipId, userId, userName 
     const value = e.target.value;
     setInput(value);
     if (!mentorshipId) return;
-    if (value.trim()) socket.emit('typing', { chatId: mentorshipId, mentorshipId, userId: currentUserId });
+    if (value.trim()) socket.emit('typing', { chatId: mentorshipId, mentorshipId });
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => {
-      socket.emit('stop_typing', { chatId: mentorshipId, mentorshipId, userId: currentUserId });
+      socket.emit('stop_typing', { chatId: mentorshipId, mentorshipId });
       typingTimeoutRef.current = null;
     }, 1000);
   };
@@ -183,7 +188,7 @@ export default function MentorshipChat({ course, mentorshipId, userId, userName 
     const uid = currentUserIdRef.current;
     if (!uid || !messageId || readSentForRef.current.has(messageId)) return;
     readSentForRef.current.add(messageId);
-    socket.emit('message_read', { messageId, userId: uid });
+    socket.emit('message_read', { messageId });
   }, []);
 
   const renderStatusTicks = (msg) => {
@@ -273,11 +278,11 @@ export default function MentorshipChat({ course, mentorshipId, userId, userName 
           onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
           placeholder="Type a message..."
           className="flex-1 p-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-          disabled={loading}
+          disabled={loading || !otherUserId}
         />
         <button
           onClick={handleSend}
-          disabled={!input.trim() || loading}
+          disabled={!input.trim() || loading || !otherUserId}
           className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 hover:shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm transition-all"
         >
           Send

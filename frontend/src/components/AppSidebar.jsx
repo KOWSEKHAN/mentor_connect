@@ -7,7 +7,6 @@ const NAV_ITEMS = [
   { path: '/mentee', label: 'Courses', icon: BookOpen, roles: ['mentee'] },
   { path: '/mentor', label: 'Mentees', icon: Users, roles: ['mentor'] },
   { path: '/community', label: 'Community', icon: MessageCircle, roles: ['mentee', 'mentor'] },
-  { path: '/mentee', label: 'AI Assistant', icon: Sparkles, roles: ['mentee'], sub: 'In workspace' },
   { path: '/mentee/profile', label: 'Profile', icon: User, roles: ['mentee'] },
   { path: '/mentor/profile', label: 'Profile', icon: User, roles: ['mentor'] },
 ]

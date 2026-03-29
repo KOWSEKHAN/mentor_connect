@@ -13,7 +13,7 @@ import { useNavigate } from 'react-router-dom'
 import api from '../../utils/api'
 
 export default function MenteeDashboard(){
-  const { user } = useAuth()
+  const { user, updateUser } = useAuth()
   const navigate = useNavigate()
   const [courses, setCourses] = useState([])
   const [recommendedMentors, setRecommendedMentors] = useState([])
@@ -33,15 +33,36 @@ export default function MenteeDashboard(){
   const [showMentorPicker, setShowMentorPicker] = useState(false)
   const [courseToAssign, setCourseToAssign] = useState(null)
 
+  // Find Mentors
+  const [findMentorsQuery, setFindMentorsQuery] = useState('')
+  const [findMentors, setFindMentors] = useState([])
+  const [loadingFindMentors, setLoadingFindMentors] = useState(false)
+
   // Fetch courses on mount
   useEffect(() => {
     fetchCourses()
     fetchRecommendations()
+    fetchFindMentors()
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    api
+      .get('/api/points/summary')
+      .then((res) => {
+        if (cancelled) return
+        const bal = res.data?.balance ?? 0
+        updateUser?.({ points: bal })
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const fetchCourses = async () => {
     try {
-      const res = await api.get('/api/courses/me')
+      const res = await api.get('/api/mentee/courses')
       setCourses(res.data.courses || [])
     } catch (err) {
       console.error('Failed to fetch courses:', err)
@@ -59,6 +80,19 @@ export default function MenteeDashboard(){
       setRecommendedMentors([])
     } finally {
       setLoadingRecommendations(false)
+    }
+  }
+
+  const fetchFindMentors = async () => {
+    setLoadingFindMentors(true)
+    try {
+      const res = await api.get('/api/mentors')
+      setFindMentors(res.data.mentors || [])
+    } catch (err) {
+      console.error('Failed to fetch mentors:', err)
+      setFindMentors([])
+    } finally {
+      setLoadingFindMentors(false)
     }
   }
 
@@ -192,12 +226,21 @@ export default function MenteeDashboard(){
     }
   }
 
+  const normalizedFindMentorsQuery = findMentorsQuery.trim().toLowerCase()
+  const filteredFindMentors = !normalizedFindMentorsQuery
+    ? findMentors
+    : findMentors.filter(
+        (m) =>
+          (m.mentor_id || '').toLowerCase().includes(normalizedFindMentorsQuery) ||
+          (m.name || '').toLowerCase().includes(normalizedFindMentorsQuery)
+      )
+
   return (
     <>
       <Header />
       <div className="flex min-h-screen">
         <AppSidebar userRole="mentee" />
-        <main className="flex-1 p-6 w-full max-w-[1400px] mx-auto">
+        <main className="flex-1 w-full min-h-screen px-6 py-4">
           <ToastContainer />
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -224,8 +267,8 @@ export default function MenteeDashboard(){
             </p>
           </div>
           <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 shadow-xl hover:scale-[1.02] transition-all duration-200">
-            <p className="text-sm text-slate-400">Recommended mentors</p>
-            <p className="text-3xl font-semibold text-white mt-1">{recommendedMentors.length}</p>
+            <p className="text-sm text-slate-400">Points balance</p>
+            <p className="text-3xl font-semibold text-amber-300 mt-1 tabular-nums">{user?.points ?? 0}</p>
           </div>
         </section>
         
@@ -532,6 +575,60 @@ export default function MenteeDashboard(){
             </Card>
           </div>
         )}
+
+        {/* Section: Find Mentors */}
+        <section className="mb-8">
+          <h3 className="font-semibold text-xl mb-4 text-white">Find Mentors</h3>
+          <div className="relative mb-4">
+            <input
+              type="text"
+              value={findMentorsQuery}
+              onChange={(e) => setFindMentorsQuery(e.target.value)}
+              placeholder="Search by mentor_id or username..."
+              className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            {loadingFindMentors && (
+              <div className="absolute right-3 top-3 text-gray-400 text-sm">Loading...</div>
+            )}
+          </div>
+
+          <div className="max-h-72 overflow-y-auto space-y-3 pr-1">
+            {loadingFindMentors && filteredFindMentors.length === 0 && (
+              <div className="text-sm text-gray-400 py-6 text-center border border-gray-700 rounded-xl bg-gray-800/30">
+                Loading mentors...
+              </div>
+            )}
+            {(!loadingFindMentors && filteredFindMentors.length === 0) && (
+              <div className="text-sm text-gray-400 py-6 text-center border border-gray-700 rounded-xl bg-gray-800/30">
+                No mentors found.
+              </div>
+            )}
+
+            {filteredFindMentors.map((mentor) => (
+              <div
+                key={mentor.mentor_id}
+                className="bg-gray-800 border border-gray-700 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="font-semibold text-white">{mentor.name}</div>
+                    <div className="text-xs text-gray-300 mt-1">
+                      Mentor ID: <span className="font-mono">{mentor.mentor_id}</span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm text-gray-200">
+                      Rating: {typeof mentor.rating === 'number' ? mentor.rating.toFixed(1) : '0.0'}
+                    </div>
+                    <div className="text-xs text-gray-400">
+                      {mentor.totalReviews || 0} reviews
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
 
         {/* Section 3: Discover Mentors (Recommendations) */}
         <section>

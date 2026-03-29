@@ -1,5 +1,7 @@
 // src/controllers/menteeController.js
 import User from '../models/User.js';
+import Mentorship from '../models/Mentorship.js';
+import Course from '../models/Course.js';
 
 // mentor wants to see their mentees (example)
 export const getMyMentees = async (req, res) => {
@@ -74,6 +76,52 @@ export const getRecommendations = async (req, res) => {
       .sort((a, b) => b.sharedInterestsCount - a.sharedInterestsCount);
 
     return res.json({ mentors: scoredMentors });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
+/**
+ * Get mentee's courses that are linked to accepted mentorships.
+ * GET /api/mentee/courses
+ */
+export const getMenteeCourses = async (req, res) => {
+  try {
+    const menteeId = req.user._id;
+
+    const mentorships = await Mentorship.find({
+      menteeId,
+      status: { $in: ['accepted', 'completed'] },
+    }).select('mentorId');
+
+    const mentorIds = mentorships
+      .map((m) => m.mentorId)
+      .filter(Boolean);
+
+    const courseQuery = {
+      $or: [
+        { mentee: menteeId },
+        { menteeId },
+      ],
+    };
+
+    if (mentorIds.length > 0) {
+      courseQuery.$and = [
+        {
+          $or: [
+            { mentor: { $in: mentorIds } },
+            { mentorId: { $in: mentorIds } },
+          ],
+        },
+      ];
+    }
+
+    const courses = await Course.find(courseQuery)
+      .populate('mentor', 'name email')
+      .sort({ updatedAt: -1 });
+
+    return res.json({ courses });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Server error' });

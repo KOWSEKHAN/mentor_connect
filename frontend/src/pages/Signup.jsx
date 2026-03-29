@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "../utils/auth";
-import axios from "axios";
+import api from "../utils/api";
 import { Link, useNavigate } from "react-router-dom";
 
 export default function Signup() {
@@ -60,7 +60,7 @@ export default function Signup() {
         formData.append("interests", interests.join(","));
       }
 
-      const res = await axios.post("http://localhost:5000/api/auth/signup", formData, {
+      const res = await api.post("/api/auth/signup", formData, {
         headers: {
           "Content-Type": "multipart/form-data"
         }

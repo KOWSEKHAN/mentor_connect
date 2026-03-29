@@ -34,13 +34,44 @@ function PageTransition({ children }) {
   );
 }
 
+function RootRoute() {
+  const { user, ready } = useAuth();
+
+  if (!ready) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-slate-950 text-slate-400">
+        Loading...
+      </div>
+    );
+  }
+
+  // If authenticated, never show landing at `/` — route users directly to their dashboard.
+  if (user) {
+    return (
+      <Navigate
+        to={user.role === 'mentor' ? '/mentor' : '/mentee'}
+        replace
+      />
+    );
+  }
+
+  return <Home />;
+}
+
 function App() {
   return (
     <AuthProvider>
       <CommunityUnreadProvider>
         <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900">
           <Routes>
-            <Route path="/" element={<PageTransition><Home /></PageTransition>} />
+            <Route
+              path="/"
+              element={
+                <PageTransition>
+                  <RootRoute />
+                </PageTransition>
+              }
+            />
             <Route path="/auth" element={<PageTransition><Auth /></PageTransition>} />
             <Route
               path="/mentor"
@@ -53,7 +84,7 @@ function App() {
               }
             />
             <Route
-              path="/mentor/workspace/:menteeId"
+              path="/mentor/workspace/:mentorshipId"
               element={
                 <PageTransition>
                   <Protected role="mentor">

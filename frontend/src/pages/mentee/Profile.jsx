@@ -11,8 +11,16 @@ import api from '../../utils/api'
 import { motion } from 'framer-motion'
 import Skeleton from '../../components/ui/Skeleton'
 
+const TX_LABEL = {
+  signup: 'Signup',
+  course_completion: 'Course completion',
+  task_completion: 'Task completion',
+  mentor_reward: 'Mentor reward',
+  spend: 'Spend',
+}
+
 export default function Profile() {
-  const { user: authUser } = useAuth()
+  const { user: authUser, updateUser } = useAuth()
   const navigate = useNavigate()
   
   const [loading, setLoading] = useState(true)
@@ -27,10 +35,44 @@ export default function Profile() {
   const [interestsInput, setInterestsInput] = useState('')
   const [profilePhotoFile, setProfilePhotoFile] = useState(null)
   const [resumeFile, setResumeFile] = useState(null)
+  const [pointLedger, setPointLedger] = useState({ balance: 0, transactions: [] })
+  const [pointsLoading, setPointsLoading] = useState(false)
+
+  const fetchPointsLedger = async () => {
+    setPointsLoading(true)
+    try {
+      const res = await api.get('/api/points')
+      const balance = res.data?.balance ?? 0
+      setPointLedger({ balance, transactions: res.data?.transactions || [] })
+      updateUser?.({ points: balance })
+    } catch (err) {
+      console.error('Failed to load points:', err)
+    } finally {
+      setPointsLoading(false)
+    }
+  }
 
   useEffect(() => {
+    if (!authUser) return
+    // Prevent role/profile mixups when switching users without full reload.
+    if (authUser.role && authUser.role !== 'mentee') {
+      navigate('/mentor', { replace: true })
+      return
+    }
+    setLoading(true)
+    setProfile({
+      name: '',
+      email: '',
+      profilePhoto: '',
+      resumeUrl: '',
+      interests: []
+    })
+    setInterestsInput('')
+    setProfilePhotoFile(null)
+    setResumeFile(null)
     fetchProfile()
-  }, [])
+    fetchPointsLedger()
+  }, [authUser?._id, authUser?.id, authUser?.role])
 
   const fetchProfile = async () => {
     try {
@@ -83,6 +125,13 @@ export default function Profile() {
       
       // Update local state
       if (res.data.user) {
+        // Keep global auth user in sync (header/sidebar/etc.)
+        updateUser?.({
+          name: res.data.user.name,
+          email: res.data.user.email,
+          role: res.data.user.role,
+          _id: res.data.user.id || res.data.user._id
+        })
         setProfile(prev => ({
           ...prev,
           name: res.data.user.name,
@@ -178,6 +227,58 @@ export default function Profile() {
                         </span>
                       ))}
                     </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="mb-6 p-4 rounded-xl bg-slate-900/50 border border-slate-700">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm text-slate-400">Points balance</p>
+                    <p className="text-2xl font-semibold text-amber-300 tabular-nums">
+                      {pointsLoading ? '…' : pointLedger.balance}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => fetchPointsLedger()}
+                    className="text-sm text-indigo-400 hover:text-indigo-300"
+                  >
+                    Refresh
+                  </button>
+                </div>
+                <div className="mt-4 max-h-48 overflow-y-auto border-t border-slate-700 pt-3">
+                  <p className="text-xs text-slate-500 uppercase tracking-wide mb-2">Recent activity</p>
+                  {!pointLedger.transactions.length && !pointsLoading ? (
+                    <p className="text-sm text-slate-500">No transactions yet.</p>
+                  ) : (
+                    <ul className="space-y-2 text-sm">
+                      {pointLedger.transactions.slice(0, 30).map((tx) => (
+                        <li
+                          key={tx._id}
+                          className="flex justify-between gap-2 text-slate-300"
+                        >
+                          <span>
+                            {tx.points > 0 ? '+' : ''}
+                            {tx.points}{' '}
+                            <span className="text-slate-500">
+                              {TX_LABEL[tx.type] || tx.type}
+                            </span>
+                            {tx.description ? (
+                              <span className="text-slate-500"> — {tx.description}</span>
+                            ) : null}
+                          </span>
+                          <span className="text-slate-500 whitespace-nowrap tabular-nums">
+                            {tx.createdAt
+                              ? new Date(tx.createdAt).toLocaleDateString(undefined, {
+                                  month: 'short',
+                                  day: 'numeric',
+                                })
+                              : ''}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
                   )}
                 </div>
               </div>

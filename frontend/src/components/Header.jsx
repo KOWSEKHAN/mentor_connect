@@ -15,14 +15,6 @@ export default function Header() {
           MentorConnect
         </Link>
         <nav className="flex items-center gap-2">
-          {user && (
-            <Link
-              to="/"
-              className="px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors text-sm font-medium"
-            >
-              Home
-            </Link>
-          )}
           {!user && (
             <>
               <Link
@@ -41,6 +33,9 @@ export default function Header() {
           )}
           {user && (
             <>
+              <span className="hidden sm:inline text-amber-300/90 text-sm font-semibold tabular-nums px-2 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                {(user.points ?? 0).toLocaleString()} pts
+              </span>
               <Link
                 to="/community"
                 className="relative px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors text-sm font-medium flex items-center gap-2"

@@ -7,6 +7,7 @@ import pdfParse from 'pdf-parse'
 import Tesseract from 'tesseract.js'
 import mammoth from 'mammoth'
 import { extractKeywords } from '../utils/resumeParser.js'
+import { grantPointsOnce } from '../services/pointService.js'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'please_change_this_secret'
 
@@ -121,8 +122,22 @@ export const signup = async (req, res) => {
 
     const user = await User.create(userData)
 
+    try {
+      await grantPointsOnce(user._id, 100, 'signup', `signup:${user._id}`, 'Signup reward')
+    } catch (ptErr) {
+      console.error('Signup reward failed:', ptErr)
+    }
+
+    const refreshed = await User.findById(user._id).select('points').lean()
     const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET, { expiresIn: '7d' })
-    const userPayload = { id: user._id, _id: user._id, name: user.name, email: user.email, role: user.role }
+    const userPayload = {
+      id: user._id,
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      points: refreshed?.points ?? 0,
+    }
     res.status(201).json({ message: 'Signup successful', user: userPayload, token })
   } catch (err) {
     console.error(err)
@@ -142,7 +157,14 @@ export const login = async (req, res) => {
     if (!match) return res.status(400).json({ message: 'Invalid credentials' })
 
     const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET, { expiresIn: '7d' })
-    const userPayload = { id: user._id, _id: user._id, name: user.name, email: user.email, role: user.role }
+    const userPayload = {
+      id: user._id,
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      points: user.points != null ? user.points : 0,
+    }
     res.json({ message: 'Login successful', user: userPayload, token })
   } catch (err) {
     console.error(err)
@@ -158,7 +180,14 @@ export const getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select('-password').lean()
     if (!user) return res.status(401).json({ message: 'User not found' })
-    const userPayload = { id: user._id, _id: user._id, name: user.name, email: user.email, role: user.role }
+    const userPayload = {
+      id: user._id,
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      points: user.points != null ? user.points : 0,
+    }
     res.json({ user: userPayload })
   } catch (err) {
     console.error(err)
