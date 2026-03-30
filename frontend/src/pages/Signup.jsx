@@ -1,10 +1,9 @@
 import { useState } from "react";
 import { useAuth } from "../utils/auth";
 import api from "../utils/api";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 
 export default function Signup() {
-  const navigate = useNavigate();
   const { login } = useAuth();
 
   const [form, setForm] = useState({
@@ -67,9 +66,6 @@ export default function Signup() {
       });
 
       login(res.data.user, res.data.token);
-
-      if(res.data.user.role === "mentor") navigate("/mentor");
-      else navigate("/mentee");
 
     } catch (err) {
       setError(err.response?.data?.message || "Signup failed. Try again.");

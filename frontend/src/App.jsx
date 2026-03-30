@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
 import Home from "./pages/Home";
 import Auth from "./pages/Auth";
@@ -13,11 +13,24 @@ import NotFound from "./pages/NotFound";
 import { AuthProvider, useAuth } from "./utils/auth";
 import { CommunityUnreadProvider } from "./context/CommunityUnreadContext";
 
-function Protected({ children, role }) {
+function LoadingScreen() {
+  return <div className="flex items-center justify-center min-h-screen bg-slate-950 text-slate-400">Loading...</div>;
+}
+
+function ProtectedRoute({ children, role }) {
   const { user, ready } = useAuth();
-  if (!ready) return <div className="flex items-center justify-center min-h-screen bg-slate-950 text-slate-400">Loading...</div>;
+  if (!ready) return <LoadingScreen />;
   if (!user) return <Navigate to="/auth" replace />;
   if (role && user.role !== role) return <Navigate to="/" replace />;
+  return children;
+}
+
+function PublicRoute({ children }) {
+  const { user, ready } = useAuth();
+  if (!ready) return <LoadingScreen />;
+  if (user) {
+    return <Navigate to={user.role === 'mentor' ? '/mentor' : '/mentee'} replace />;
+  }
   return children;
 }
 
@@ -36,25 +49,13 @@ function PageTransition({ children }) {
 
 function RootRoute() {
   const { user, ready } = useAuth();
+  const location = useLocation();
+  console.log('Route decision:', { user: user?._id || user?.id || null, ready, pathname: location.pathname });
 
-  if (!ready) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-950 text-slate-400">
-        Loading...
-      </div>
-    );
-  }
-
-  // If authenticated, never show landing at `/` — route users directly to their dashboard.
+  if (!ready) return <LoadingScreen />;
   if (user) {
-    return (
-      <Navigate
-        to={user.role === 'mentor' ? '/mentor' : '/mentee'}
-        replace
-      />
-    );
+    return <Navigate to={user.role === 'mentor' ? '/mentor' : '/mentee'} replace />;
   }
-
   return <Home />;
 }
 
@@ -72,14 +73,23 @@ function App() {
                 </PageTransition>
               }
             />
-            <Route path="/auth" element={<PageTransition><Auth /></PageTransition>} />
+            <Route
+              path="/auth"
+              element={
+                <PageTransition>
+                  <PublicRoute>
+                    <Auth />
+                  </PublicRoute>
+                </PageTransition>
+              }
+            />
             <Route
               path="/mentor"
               element={
                 <PageTransition>
-                  <Protected role="mentor">
+                  <ProtectedRoute role="mentor">
                     <MentorDashboard />
-                  </Protected>
+                  </ProtectedRoute>
                 </PageTransition>
               }
             />
@@ -87,9 +97,9 @@ function App() {
               path="/mentor/workspace/:mentorshipId"
               element={
                 <PageTransition>
-                  <Protected role="mentor">
+                  <ProtectedRoute role="mentor">
                     <MentorWorkspace />
-                  </Protected>
+                  </ProtectedRoute>
                 </PageTransition>
               }
             />
@@ -97,9 +107,9 @@ function App() {
               path="/mentor/profile"
               element={
                 <PageTransition>
-                  <Protected role="mentor">
+                  <ProtectedRoute role="mentor">
                     <MentorProfile />
-                  </Protected>
+                  </ProtectedRoute>
                 </PageTransition>
               }
             />
@@ -107,9 +117,9 @@ function App() {
               path="/mentee"
               element={
                 <PageTransition>
-                  <Protected role="mentee">
+                  <ProtectedRoute role="mentee">
                     <MenteeDashboard />
-                  </Protected>
+                  </ProtectedRoute>
                 </PageTransition>
               }
             />
@@ -117,9 +127,9 @@ function App() {
               path="/mentee/profile"
               element={
                 <PageTransition>
-                  <Protected role="mentee">
+                  <ProtectedRoute role="mentee">
                     <MenteeProfile />
-                  </Protected>
+                  </ProtectedRoute>
                 </PageTransition>
               }
             />
@@ -127,9 +137,9 @@ function App() {
               path="/mentee/course/:courseId"
               element={
                 <PageTransition>
-                  <Protected role="mentee">
+                  <ProtectedRoute role="mentee">
                     <CourseWorkspace />
-                  </Protected>
+                  </ProtectedRoute>
                 </PageTransition>
               }
             />
@@ -137,9 +147,9 @@ function App() {
               path="/community"
               element={
                 <PageTransition>
-                  <Protected>
+                  <ProtectedRoute>
                     <CommunityChat />
-                  </Protected>
+                  </ProtectedRoute>
                 </PageTransition>
               }
             />

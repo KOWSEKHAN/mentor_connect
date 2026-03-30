@@ -1,6 +1,6 @@
+import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
-import dotenv from 'dotenv'
 import jwt from 'jsonwebtoken'
 import { createServer } from 'http'
 import { Server } from 'socket.io'
@@ -8,9 +8,8 @@ import connectDB from './src/config/db.js'
 import Message from './src/models/Message.js'
 import User from './src/models/User.js'
 import Mentorship from './src/models/Mentorship.js'
+import { getJwtSecret } from './src/config/jwt.js'
 
-dotenv.config()
-const JWT_SECRET = process.env.JWT_SECRET || 'please_change_this_secret'
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173'
 
 import authRoutes from './src/routes/authRoutes.js'
@@ -104,7 +103,7 @@ io.use((socket, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET)
+    const decoded = jwt.verify(token, getJwtSecret())
     socket.userId = (decoded.id?.toString?.() || decoded.id)
     socket.user = decoded
   } catch (err) {

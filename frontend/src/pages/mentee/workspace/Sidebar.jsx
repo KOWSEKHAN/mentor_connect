@@ -10,9 +10,9 @@ export default function Sidebar({ activeTab, setActiveTab }) {
   ]
 
   return (
-    <div className="bg-slate-900 border-r border-slate-700 rounded-xl p-4 h-full">
-      <h3 className="font-semibold mb-4 text-white">Workspace</h3>
-      <nav className="space-y-2">
+    <div className="bg-slate-900 border-r border-slate-700 rounded-xl p-4 h-full min-h-0 flex flex-col">
+      <h3 className="font-semibold mb-4 text-white flex-shrink-0">Workspace</h3>
+      <nav className="space-y-2 overflow-y-auto min-h-0">
         {tabs.map((tab) => (
           <button
             key={tab.id}

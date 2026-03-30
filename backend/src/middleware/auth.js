@@ -1,7 +1,7 @@
 // backend/src/middleware/auth.js
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
-const JWT_SECRET = process.env.JWT_SECRET || 'please_change_this_secret';
+import { getJwtSecret } from '../config/jwt.js';
 
 export const protect = async (req, res, next) => {
   try {
@@ -10,7 +10,7 @@ export const protect = async (req, res, next) => {
       return res.status(401).json({ message: 'No token provided' });
     }
     const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, getJwtSecret());
     const user = await User.findById(decoded.id).select('-password');
     if (!user) return res.status(401).json({ message: 'User not found' });
     req.user = user;

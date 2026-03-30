@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import api from './api';
 import { disconnectSocket, connectSocket } from '../socket';
 
@@ -14,48 +14,46 @@ function getStoredToken() {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [ready, setReady] = useState(false);
+  const hasInitializedRef = useRef(false);
 
   useEffect(() => {
+    if (hasInitializedRef.current) return;
+    hasInitializedRef.current = true;
+
     const restore = async () => {
       const token = getStoredToken();
+      console.log('Auth init:', { token: !!token, user, ready });
+
       if (!token) {
         setUser(null);
         setReady(true);
         return;
       }
 
-      // Optimistic restore: show cached user immediately to avoid flicker/logouts
-      // on transient network issues. We will still verify via `/api/auth/me`.
-      try {
-        const cached = localStorage.getItem(USER_KEY);
-        if (cached) setUser(JSON.parse(cached));
-      } catch {
-        // Ignore cached parse errors.
-      }
-
       try {
         const res = await api.get('/api/auth/me');
         setUser(res.data.user);
-        connectSocket();
       } catch (err) {
-        // Only invalidate the session on explicit auth failure.
-        if (err?.response?.status === 401) {
-          localStorage.removeItem(TOKEN_KEY);
-          localStorage.removeItem(USER_KEY);
-          localStorage.removeItem('mc_user');
-          setUser(null);
-          disconnectSocket();
-        }
+        // Force clean startup: never keep a token that fails backend validation.
+        localStorage.removeItem(TOKEN_KEY);
+        localStorage.removeItem(USER_KEY);
+        localStorage.removeItem('mc_user');
+        // Keep auth state deterministic: no verified user => unauthenticated UI.
+        setUser(null);
+      } finally {
+        setReady(true);
       }
-      setReady(true);
     };
     restore();
   }, []);
 
   useEffect(() => {
+    console.log('Auth state:', { user: user?._id || user?.id || null, ready });
+  }, [user, ready]);
+
+  useEffect(() => {
     const onUnauthorized = () => {
       setUser(null);
-      disconnectSocket();
       setReady(true);
     };
     if (typeof window !== 'undefined') {
@@ -68,11 +66,39 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
+  useEffect(() => {
+    const onStorage = (event) => {
+      if (event.key === TOKEN_KEY && !event.newValue) {
+        setUser(null);
+        disconnectSocket();
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage', onStorage);
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('storage', onStorage);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    const tokenForSocket = typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null;
+    if (user) {
+      console.log('Token being used:', tokenForSocket ? `${tokenForSocket.slice(0, 16)}...` : null);
+      connectSocket();
+    }
+    else disconnectSocket();
+  }, [user, ready]);
+
   const login = (userObj, token) => {
     localStorage.setItem(TOKEN_KEY, token);
     localStorage.setItem(USER_KEY, JSON.stringify(userObj));
     setUser(userObj);
-    connectSocket();
   };
 
   const updateUser = (next) => {
@@ -90,7 +116,6 @@ export function AuthProvider({ children }) {
     localStorage.removeItem(USER_KEY);
     localStorage.removeItem('mc_user');
     setUser(null);
-    disconnectSocket();
   };
 
   return (

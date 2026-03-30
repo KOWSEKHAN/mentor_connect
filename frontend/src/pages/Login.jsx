@@ -1,10 +1,9 @@
 import { useState } from "react";
 import { useAuth } from "../utils/auth";
 import api from "../utils/api";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 
 export default function Login() {
-  const navigate = useNavigate();
   const { login } = useAuth();
 
   const [form, setForm] = useState({
@@ -26,10 +25,6 @@ export default function Login() {
       const res = await api.post("/api/auth/login", form);
 
       login(res.data.user, res.data.token);
-
-      if(res.data.user.role === "mentor") navigate("/mentor");
-      else if(res.data.user.role === "mentee") navigate("/mentee");
-      else navigate("/");
 
     } catch (err) {
       setError(err.response?.data?.message || "Login failed. Try again.");

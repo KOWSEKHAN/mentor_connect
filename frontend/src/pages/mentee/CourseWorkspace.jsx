@@ -69,8 +69,8 @@ export default function CourseWorkspace() {
     return (
       <>
         <Header />
-        <div className="min-h-screen w-full bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800">
-          <main className="w-full min-h-screen px-6 py-4 flex flex-col">
+        <div className="h-screen w-full bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 flex flex-col overflow-hidden">
+          <main className="w-full flex-1 min-h-0 px-6 py-4 flex flex-col overflow-hidden">
             <div className="w-full flex-1 flex items-center justify-center p-4">
               <div className="text-slate-400">Loading course...</div>
             </div>
@@ -85,8 +85,8 @@ export default function CourseWorkspace() {
     return (
       <>
         <Header />
-        <div className="min-h-screen w-full bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800">
-          <main className="w-full min-h-screen px-6 py-4 flex flex-col">
+        <div className="h-screen w-full bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 flex flex-col overflow-hidden">
+          <main className="w-full flex-1 min-h-0 px-6 py-4 flex flex-col overflow-hidden">
             <div className="w-full flex-1 flex items-center justify-center p-4">
               <div className="text-slate-400">Course not found</div>
             </div>
@@ -102,8 +102,8 @@ export default function CourseWorkspace() {
   return (
     <>
       <Header />
-      <div className="min-h-screen w-full bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800">
-        <main className="w-full min-h-screen px-6 py-4 flex flex-col">
+      <div className="h-screen w-full bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 flex flex-col overflow-hidden">
+        <main className="w-full flex-1 min-h-0 px-6 py-4 flex flex-col overflow-hidden">
           <div className="w-full flex-shrink-0 mb-4">
             <button
               type="button"
@@ -124,14 +124,15 @@ export default function CourseWorkspace() {
             </div>
           </div>
 
-          <div className="flex flex-1 min-h-0 gap-6 w-full h-[calc(100vh-220px)]">
+          <div className="flex flex-1 min-h-0 overflow-hidden gap-6 w-full">
             <div className="w-64 flex-shrink-0 h-full min-h-0">
               <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
             </div>
 
-            <div className="flex-1 flex flex-col min-w-0 min-h-0 w-full h-full">
+            <div className="flex-1 flex flex-col overflow-hidden min-w-0 min-h-0 w-full h-full">
               <div className="w-full h-full flex flex-col min-h-0 rounded-xl border border-slate-700 bg-slate-900/40 overflow-hidden">
-                <div className="w-full flex-1 min-h-0 p-4 md:p-6 overflow-auto">
+                <div className="flex-1 overflow-hidden">
+                  <div className="h-full overflow-y-auto p-4 md:p-6">
                   {activeTab === 'overview' && (
                     <OverviewView course={course} />
                   )}
@@ -174,7 +175,7 @@ export default function CourseWorkspace() {
                     <Certificate course={course} courseId={courseId} user={user} />
                   )}
                   {activeTab === 'chat' && (
-                    <div className="w-full h-full min-h-[480px] flex flex-col">
+                    <div className="w-full h-full flex flex-col">
                       <ChatBox
                         course={course}
                         mentorshipId={course?.mentorshipId}
@@ -183,6 +184,7 @@ export default function CourseWorkspace() {
                       />
                     </div>
                   )}
+                  </div>
                 </div>
               </div>
             </div>

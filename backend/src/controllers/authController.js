@@ -8,8 +8,7 @@ import Tesseract from 'tesseract.js'
 import mammoth from 'mammoth'
 import { extractKeywords } from '../utils/resumeParser.js'
 import { grantPointsOnce } from '../services/pointService.js'
-
-const JWT_SECRET = process.env.JWT_SECRET || 'please_change_this_secret'
+import { getJwtSecret } from '../config/jwt.js'
 
 const readFileTextByType = async (filePath, mimeType) => {
   const ext = path.extname(filePath || '').toLowerCase()
@@ -129,7 +128,7 @@ export const signup = async (req, res) => {
     }
 
     const refreshed = await User.findById(user._id).select('points').lean()
-    const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET, { expiresIn: '7d' })
+    const token = jwt.sign({ id: user._id, role: user.role }, getJwtSecret(), { expiresIn: '7d' })
     const userPayload = {
       id: user._id,
       _id: user._id,
@@ -156,7 +155,7 @@ export const login = async (req, res) => {
     const match = await bcrypt.compare(password, user.password)
     if (!match) return res.status(400).json({ message: 'Invalid credentials' })
 
-    const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET, { expiresIn: '7d' })
+    const token = jwt.sign({ id: user._id, role: user.role }, getJwtSecret(), { expiresIn: '7d' })
     const userPayload = {
       id: user._id,
       _id: user._id,

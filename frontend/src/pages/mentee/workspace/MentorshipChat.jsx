@@ -201,15 +201,17 @@ export default function MentorshipChat({ course, mentorshipId, userId, userName 
 
   if (!mentorshipId) {
     return (
-      <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 h-full flex items-center justify-center">
+      <div className="h-full flex flex-col bg-slate-900 border border-slate-700 rounded-xl p-4 min-h-0">
+        <div className="flex-1 overflow-y-auto flex items-center justify-center">
         <p className="text-slate-400 text-sm">No mentorship found. Please wait for mentor assignment.</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 h-full flex flex-col">
-      <div className="flex items-center justify-between mb-2">
+    <div className="h-full flex flex-col bg-slate-900 border border-slate-700 rounded-xl p-4 min-h-0">
+      <div className="flex items-center justify-between mb-2 flex-shrink-0">
         <h3 className="font-semibold text-white">Chat with {mentorName}</h3>
         <div className="flex items-center gap-2">
           {otherUserOnline && (
@@ -223,7 +225,7 @@ export default function MentorshipChat({ course, mentorshipId, userId, userName 
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto mb-3 space-y-2 p-2 border border-slate-700 rounded-xl bg-slate-900/50">
+      <div className="flex-1 overflow-y-auto mb-3 space-y-2 p-2 border border-slate-700 rounded-xl bg-slate-900/50 min-h-0">
         {loading ? (
           <div className="text-center text-slate-500 py-4 text-sm">Loading messages...</div>
         ) : messages.length === 0 ? (
@@ -270,7 +272,7 @@ export default function MentorshipChat({ course, mentorshipId, userId, userName 
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="flex gap-2">
+      <div className="flex gap-2 border-t border-slate-700 pt-3 flex-shrink-0">
         <input
           type="text"
           value={input}
