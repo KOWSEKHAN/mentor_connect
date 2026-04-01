@@ -8,6 +8,12 @@ const roadmapSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    mentorshipId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Mentorship',
+      default: null,
+      index: true,
+    },
     menteeId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',

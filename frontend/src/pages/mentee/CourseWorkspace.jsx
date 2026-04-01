@@ -138,10 +138,9 @@ export default function CourseWorkspace() {
                   )}
                   {activeTab === 'ai-content' && (
                     <AIContentView
-                      course={course}
-                      updateCourse={updateCourse}
-                      courseId={courseId}
-                      refreshCourse={refreshCourse}
+                      mentorshipId={course?.mentorshipId}
+                      level={course?.currentLevel || selectedStep?.level || 'beginner'}
+                      userRole="mentee"
                     />
                   )}
                   {activeTab === 'roadmap' && (
@@ -159,9 +158,11 @@ export default function CourseWorkspace() {
                   )}
                   {activeTab === 'tasks' && (
                     <TasksView
-                      course={course}
-                      updateCourse={updateCourse}
-                      refreshCourse={refreshCourse}
+                      mentorshipId={course?.mentorshipId}
+                      level={course?.currentLevel || 'beginner'}
+                      userRole="mentee"
+                      courseId={courseId}
+                      onFlowUpdated={refreshCourse}
                     />
                   )}
                   {activeTab === 'notes' && (

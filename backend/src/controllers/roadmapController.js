@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import Roadmap from '../models/Roadmap.js';
 import RoadmapStep from '../models/RoadmapStep.js';
 import Course from '../models/Course.js';
+import Mentorship from '../models/Mentorship.js';
 import { startSafeSession } from '../../utils/dbSession.js';
 
 const LEVELS = ['beginner', 'intermediate', 'advanced', 'master'];
@@ -51,7 +52,7 @@ export const createRoadmap = async (req, res) => {
       return res.status(400).json({ message: 'courseId and menteeId are required' });
     }
 
-    const course = await Course.findById(courseId).select('mentee mentor title').lean();
+    const course = await Course.findById(courseId).select('mentee mentor title mentorshipId').lean();
     if (!course) return res.status(404).json({ message: 'Course not found' });
     const courseMenteeId = (course.mentee?._id || course.mentee).toString();
     const courseMentorId = course.mentor ? (course.mentor._id || course.mentor).toString() : null;
@@ -85,6 +86,7 @@ export const createRoadmap = async (req, res) => {
       roadmap = await Roadmap.create(
         [{
           courseId,
+          mentorshipId: course.mentorshipId || null,
           menteeId,
           mentorId: mentorId || courseMentorId || null,
           title: roadmapTitle,
@@ -107,6 +109,7 @@ export const createRoadmap = async (req, res) => {
     const stepsToCreate = Array.isArray(stepsInput) && stepsInput.length > 0
       ? stepsInput.map((s, i) => ({
           roadmapId: roadmap._id,
+          mentorshipId: course.mentorshipId || null,
           order: s.order ?? i + 1,
           level: s.level && LEVELS.includes(s.level) ? s.level : LEVELS[i % LEVELS.length],
           title: s.title || `${LEVELS[i % LEVELS.length]} step`,
@@ -117,6 +120,7 @@ export const createRoadmap = async (req, res) => {
         }))
       : LEVELS.map((level, i) => ({
           roadmapId: roadmap._id,
+          mentorshipId: course.mentorshipId || null,
           order: i + 1,
           level,
           title: `${level.charAt(0).toUpperCase() + level.slice(1)} level`,
@@ -214,7 +218,7 @@ export const updateRoadmap = async (req, res) => {
 
     const existing = await Roadmap.findById(roadmapId).select('courseId menteeId mentorId title version').lean();
     if (!existing) return res.status(404).json({ message: 'Roadmap not found' });
-    const course = await Course.findById(existing.courseId).select('mentor').lean();
+    const course = await Course.findById(existing.courseId).select('mentor mentorshipId').lean();
     const courseMentorId = course?.mentor ? (course.mentor._id || course.mentor).toString() : null;
     const isMentorOwner = existing.mentorId && existing.mentorId.toString() === userId.toString();
     const isCourseMentor = courseMentorId && courseMentorId === userId.toString();
@@ -243,6 +247,7 @@ export const updateRoadmap = async (req, res) => {
     const roadmap = await Roadmap.create(
       [{
         courseId: existing.courseId,
+        mentorshipId: course?.mentorshipId || null,
         menteeId: existing.menteeId,
         mentorId: existing.mentorId,
         title: title || existing.title,
@@ -257,6 +262,7 @@ export const updateRoadmap = async (req, res) => {
     const stepsToCreate = Array.isArray(stepsInput) && stepsInput.length > 0
       ? stepsInput.map((s, i) => ({
           roadmapId: roadmap._id,
+          mentorshipId: course?.mentorshipId || null,
           order: s.order ?? i + 1,
           level: s.level && LEVELS.includes(s.level) ? s.level : LEVELS[i % LEVELS.length],
           title: s.title || 'Step',
@@ -267,6 +273,7 @@ export const updateRoadmap = async (req, res) => {
         }))
       : LEVELS.map((level, i) => ({
           roadmapId: roadmap._id,
+          mentorshipId: course?.mentorshipId || null,
           order: i + 1,
           level,
           title: `${level.charAt(0).toUpperCase() + level.slice(1)} level`,
@@ -327,7 +334,7 @@ export const generateRoadmapAI = async (req, res) => {
 
     if (!courseId || !menteeId) return res.status(400).json({ message: 'courseId and menteeId are required' });
 
-    const course = await Course.findById(courseId).select('mentee mentor title domain').lean();
+    const course = await Course.findById(courseId).select('mentee mentor title domain mentorshipId').lean();
     if (!course) return res.status(404).json({ message: 'Course not found' });
     const courseMenteeId = (course.mentee?._id || course.mentee).toString();
     if (courseMenteeId !== menteeId.toString()) return res.status(403).json({ message: 'menteeId does not match course' });
@@ -356,6 +363,7 @@ export const generateRoadmapAI = async (req, res) => {
     const roadmap = await Roadmap.create(
       [{
         courseId,
+        mentorshipId: course.mentorshipId || null,
         menteeId,
         mentorId: mentorId || course.mentor || null,
         title: aiPayload.title,
@@ -369,6 +377,7 @@ export const generateRoadmapAI = async (req, res) => {
 
     const stepsToCreate = aiPayload.steps.map((s) => ({
       roadmapId: roadmap._id,
+      mentorshipId: course.mentorshipId || null,
       order: s.order,
       level: s.level,
       title: s.title,
@@ -431,7 +440,7 @@ export const generateRoadmap = async (req, res) => {
       return res.status(400).json({ message: 'courseId is required' });
     }
 
-    const course = await Course.findById(courseId).select('mentee mentor title domain').lean();
+    const course = await Course.findById(courseId).select('mentee mentor title domain mentorshipId').lean();
     if (!course) return res.status(404).json({ message: 'Course not found' });
 
     const menteeId = course.mentee?._id || course.mentee;
@@ -458,6 +467,7 @@ export const generateRoadmap = async (req, res) => {
     const title = titleOverride || course.title || 'Learning Roadmap';
     const roadmap = await Roadmap.create({
       courseId,
+      mentorshipId: course.mentorshipId || null,
       menteeId,
       mentorId,
       title,
@@ -472,6 +482,7 @@ export const generateRoadmap = async (req, res) => {
       const level = LEVELS[i];
       const step = await RoadmapStep.create({
         roadmapId: roadmap._id,
+        mentorshipId: course.mentorshipId || null,
         order: i + 1,
         level,
         title: `${level.charAt(0).toUpperCase() + level.slice(1)} level`,
@@ -524,7 +535,7 @@ export const getCourseRoadmap = async (req, res) => {
 
     if (!courseId) return res.status(400).json({ message: 'courseId is required' });
 
-    const course = await Course.findById(courseId).select('mentee mentor').lean();
+    const course = await Course.findById(courseId).select('mentee mentor mentorshipId').lean();
     if (!course) return res.status(404).json({ message: 'Course not found' });
 
     const menteeId = course.mentee?._id || course.mentee;
@@ -537,8 +548,21 @@ export const getCourseRoadmap = async (req, res) => {
       .populate('steps')
       .lean();
 
+    let mentorshipState = null;
+    if (course.mentorshipId) {
+      mentorshipState = await Mentorship.findById(course.mentorshipId)
+        .select('currentLevel levels progress')
+        .lean();
+    }
+
     if (!roadmap) {
-      return res.json({ roadmap: null, steps: [] });
+      return res.json({
+        roadmap: null,
+        steps: [],
+        currentLevel: mentorshipState?.currentLevel || 'beginner',
+        levels: mentorshipState?.levels || LEVELS,
+        progress: mentorshipState?.progress ?? 0,
+      });
     }
 
     const steps = (roadmap.steps || []).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
@@ -548,6 +572,9 @@ export const getCourseRoadmap = async (req, res) => {
       title: roadmap.title,
       version: roadmap.version,
       generatedBy: roadmap.generatedBy,
+      currentLevel: mentorshipState?.currentLevel || 'beginner',
+      levels: mentorshipState?.levels || LEVELS,
+      progress: mentorshipState?.progress ?? 0,
       steps: steps.map((s) => ({
         stepId: s._id,
         order: s.order,
@@ -575,7 +602,7 @@ export const regenerateRoadmap = async (req, res) => {
 
     if (!courseId) return res.status(400).json({ message: 'courseId is required' });
 
-    const course = await Course.findById(courseId).select('mentee mentor title').lean();
+    const course = await Course.findById(courseId).select('mentee mentor title mentorshipId').lean();
     if (!course) return res.status(404).json({ message: 'Course not found' });
 
     const mentorId = course.mentor?._id || course.mentor;
@@ -598,6 +625,7 @@ export const regenerateRoadmap = async (req, res) => {
 
     const roadmap = await Roadmap.create({
       courseId,
+      mentorshipId: course.mentorshipId || null,
       menteeId,
       mentorId,
       title: course.title || 'Learning Roadmap',
@@ -612,6 +640,7 @@ export const regenerateRoadmap = async (req, res) => {
       const level = LEVELS[i];
       const step = await RoadmapStep.create({
         roadmapId: roadmap._id,
+        mentorshipId: course.mentorshipId || null,
         order: i + 1,
         level,
         title: `${level.charAt(0).toUpperCase() + level.slice(1)} level`,

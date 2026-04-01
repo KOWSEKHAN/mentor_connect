@@ -202,6 +202,10 @@ export const getMenteeWorkspace = async (req, res) => {
         mentorshipId: mentorship._id.toString(),
         domain: mentorship.domain,
         progress: mentorship.progress,
+        currentLevel: mentorship.currentLevel || 'beginner',
+        levels: Array.isArray(mentorship.levels) && mentorship.levels.length
+          ? mentorship.levels
+          : ['beginner', 'intermediate', 'advanced', 'master'],
         status: mentorship.status
       } : null,
       course: course ? course.toObject() : null,
@@ -260,6 +264,10 @@ export const getMentorshipDetails = async (req, res) => {
       status: mentorship.status,
       domain: mentorship.domain,
       progress: mentorship.progress ?? course?.progress ?? 0,
+      currentLevel: mentorship.currentLevel || 'beginner',
+      levels: Array.isArray(mentorship.levels) && mentorship.levels.length
+        ? mentorship.levels
+        : ['beginner', 'intermediate', 'advanced', 'master'],
       course: course ? course.toObject() : null,
       notes: course?.notes || '',
     });

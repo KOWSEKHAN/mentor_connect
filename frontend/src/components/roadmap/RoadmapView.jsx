@@ -7,6 +7,9 @@ import { showToast } from '../Toast'
 export default function RoadmapView({ courseId, userRole, onStepSelect, course = null }) {
   const [roadmap, setRoadmap] = useState(null)
   const [steps, setSteps] = useState([])
+  const [currentLevel, setCurrentLevel] = useState('beginner')
+  const [levels, setLevels] = useState(['beginner', 'intermediate', 'advanced', 'master'])
+  const [progress, setProgress] = useState(0)
   const [selectedStep, setSelectedStep] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -24,6 +27,10 @@ export default function RoadmapView({ courseId, userRole, onStepSelect, course =
       const res = await api.get(`/api/roadmaps/${courseId}`)
       const data = res.data
       if (data.roadmapId) {
+        const nextCurrentLevel = data.currentLevel || course?.currentLevel || 'beginner'
+        const nextLevels = Array.isArray(data.levels) && data.levels.length
+          ? data.levels
+          : (course?.levels || ['beginner', 'intermediate', 'advanced', 'master'])
         setRoadmap({
           roadmapId: data.roadmapId,
           title: data.title,
@@ -31,14 +38,21 @@ export default function RoadmapView({ courseId, userRole, onStepSelect, course =
           generatedBy: data.generatedBy,
         })
         setSteps(data.steps || [])
+        setCurrentLevel(nextCurrentLevel)
+        setLevels(nextLevels)
+        setProgress(Number(data.progress ?? course?.progress ?? 0))
         setTitle(data.title || '')
-        if (!selectedStep && data.steps?.length) {
-          setSelectedStep(data.steps[0])
-          onStepSelect?.(data.steps[0])
+        if (data.steps?.length) {
+          const preferred = data.steps.find((s) => s.level === nextCurrentLevel) || data.steps[0]
+          setSelectedStep(preferred)
+          onStepSelect?.(preferred)
         }
       } else {
         setRoadmap(null)
         setSteps([])
+        setCurrentLevel(course?.currentLevel || 'beginner')
+        setLevels(course?.levels || ['beginner', 'intermediate', 'advanced', 'master'])
+        setProgress(Number(course?.progress ?? 0))
         setTitle('')
         setSelectedStep(null)
         onStepSelect?.(null)
@@ -49,12 +63,15 @@ export default function RoadmapView({ courseId, userRole, onStepSelect, course =
       setError(msg)
       setRoadmap(null)
       setSteps([])
+      setCurrentLevel(course?.currentLevel || 'beginner')
+      setLevels(course?.levels || ['beginner', 'intermediate', 'advanced', 'master'])
+      setProgress(Number(course?.progress ?? 0))
       setSelectedStep(null)
       onStepSelect?.(null)
     } finally {
       setLoading(false)
     }
-  }, [courseId, onStepSelect])
+  }, [courseId, onStepSelect, course?.currentLevel, course?.levels, course?.progress])
 
   useEffect(() => {
     fetchRoadmap()
@@ -86,6 +103,7 @@ export default function RoadmapView({ courseId, userRole, onStepSelect, course =
 
   const showRegenerate = userRole === 'mentor'
   const canGenerate = !roadmap || roadmap.generatedBy !== 'mentor'
+  const currentLevelIdx = Math.max(0, levels.indexOf(currentLevel))
 
   if (loading) {
     return (
@@ -141,6 +159,16 @@ export default function RoadmapView({ courseId, userRole, onStepSelect, course =
             </button>
           )}
         </div>
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <span className="text-xs text-gray-400 uppercase tracking-wide">Current Level</span>
+          <span className="px-2.5 py-1 rounded-full bg-indigo-600/20 text-indigo-200 text-xs font-medium capitalize">
+            {currentLevel}
+          </span>
+          <span className="text-xs text-gray-400 uppercase tracking-wide">Progress</span>
+          <span className="px-2.5 py-1 rounded-full bg-emerald-600/20 text-emerald-200 text-xs font-medium">
+            {Math.max(0, Math.min(100, Number(progress || 0)))}%
+          </span>
+        </div>
 
         {!roadmap ? (
           <p className="text-gray-400 py-6 text-center">
@@ -148,17 +176,21 @@ export default function RoadmapView({ courseId, userRole, onStepSelect, course =
           </p>
         ) : (
           <div className="flex overflow-x-auto gap-4 snap-x snap-mandatory pb-4">
-            {steps.map((step) => (
+            {steps.map((step) => {
+              const stepLevelIdx = Math.max(0, levels.indexOf(step.level))
+              const isLocked = userRole === 'mentee' && stepLevelIdx > currentLevelIdx
+              return (
               <StepCard
                 key={step.stepId || step._id}
                 step={step}
                 isSelected={
                   (selectedStep?.stepId || selectedStep?._id) === (step.stepId || step._id)
                 }
-                isLocked={false}
+                isLocked={isLocked}
                 onClick={handleStepSelect}
               />
-            ))}
+              )
+            })}
           </div>
         )}
       </div>

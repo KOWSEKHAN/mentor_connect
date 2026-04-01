@@ -27,6 +27,7 @@ import communityRoutes from './src/routes/communityRoutes.js'
 import reviewRoutes from './src/routes/reviewRoutes.js'
 import certificateRoutes from './src/routes/certificateRoutes.js'
 import pointRoutes from './src/routes/pointRoutes.js'
+import structuredLearningRoutes from './src/routes/structuredLearningRoutes.js'
 
 const app = express()
 const httpServer = createServer(app)
@@ -72,6 +73,7 @@ app.use('/api/reviews', reviewRoutes)
 app.use('/api/review', reviewRoutes)
 app.use('/api/certificate', certificateRoutes)
 app.use('/api/points', pointRoutes)
+app.use('/api/structured', structuredLearningRoutes)
 
 app.get('/', (req, res) => res.send('MentorConnect Backend is running'))
 

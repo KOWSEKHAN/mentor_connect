@@ -1,22 +1,17 @@
 import mongoose from 'mongoose';
 
-const roadmapStepSchema = new mongoose.Schema(
+const taskSchema = new mongoose.Schema(
   {
-    roadmapId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Roadmap',
-      required: true,
-      index: true,
-    },
     mentorshipId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Mentorship',
-      default: null,
+      required: true,
       index: true,
     },
-    order: {
-      type: Number,
-      required: true,
+    courseId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Course',
+      default: null,
       index: true,
     },
     level: {
@@ -35,30 +30,31 @@ const roadmapStepSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
-    subtopics: [
-      {
-        type: String,
-        trim: true,
-        maxlength: 200,
-      },
-    ],
-    aiContentGenerated: {
+    isCompleted: {
       type: Boolean,
       default: false,
       index: true,
     },
-    progress: {
+    completedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    order: {
       type: Number,
       default: 0,
-      min: 0,
-      max: 100,
+      index: true,
+    },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
       index: true,
     },
   },
   { timestamps: true }
 );
 
-roadmapStepSchema.index({ roadmapId: 1, order: 1 }, { unique: true });
-roadmapStepSchema.index({ roadmapId: 1, level: 1 });
+taskSchema.index({ mentorshipId: 1, level: 1, order: 1, createdAt: 1 });
 
-export default mongoose.model('RoadmapStep', roadmapStepSchema);
+export default mongoose.model('Task', taskSchema);

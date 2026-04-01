@@ -127,6 +127,11 @@ export const acceptRequest = async (req, res) => {
 
     mentorship.status = 'accepted';
     mentorship.startedAt = mentorship.startedAt || new Date();
+    if (!Array.isArray(mentorship.levels) || mentorship.levels.length === 0) {
+      mentorship.levels = ['beginner', 'intermediate', 'advanced', 'master'];
+    }
+    if (!mentorship.currentLevel) mentorship.currentLevel = 'beginner';
+    if (typeof mentorship.progress !== 'number') mentorship.progress = 0;
     await mentorship.save();
 
     return res.json({ success: true, mentorship, courseId: course?._id || null });

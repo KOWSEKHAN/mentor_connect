@@ -64,9 +64,20 @@ export const getCourse = async (req, res) => {
       }
     }
     
-    // Add mentorshipId to course object
+    // Add mentorshipId + structured-flow state to course object (optional-safe).
     const courseObj = course.toObject();
     courseObj.mentorshipId = mentorshipId;
+    if (mentorshipId) {
+      const ms = await Mentorship.findById(mentorshipId).select('currentLevel levels progress status').lean();
+      if (ms) {
+        courseObj.currentLevel = ms.currentLevel || 'beginner';
+        courseObj.levels = Array.isArray(ms.levels) && ms.levels.length ? ms.levels : ['beginner', 'intermediate', 'advanced', 'master'];
+        // Keep backward compatibility: still expose course.progress, but align when mentorship has newer value.
+        if (typeof ms.progress === 'number' && ms.progress > (courseObj.progress || 0)) {
+          courseObj.progress = ms.progress;
+        }
+      }
+    }
     
     return res.json({ course: courseObj });
   } catch (err) {

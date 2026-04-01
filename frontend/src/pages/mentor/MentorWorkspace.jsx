@@ -48,6 +48,7 @@ export default function MentorWorkspace () {
   const course = workspace?.course || { mentee: workspace?.mentee, mentor: user }
   const courseId = course?._id || workspace?.courseId
   const chatMentorshipId = workspace?._id || workspace?.mentorship?._id || workspace?.mentorshipId || mentorshipId
+  const currentLevel = workspace?.currentLevel || workspace?.mentorship?.currentLevel || course?.currentLevel || 'beginner'
   const notes = workspace?.notes || course?.notes || 'No notes available yet.'
   const progress = workspace?.progress ?? course?.progress ?? 0
   const [selectedStep, setSelectedStep] = useState(null)
@@ -126,10 +127,9 @@ export default function MentorWorkspace () {
                 <h3 className="text-lg font-semibold text-white mb-3">AI Content</h3>
                 <div className="min-h-[200px] text-slate-400">
                   <AIContentView
-                    roadmapStepId={selectedStep?.stepId || selectedStep?._id}
-                    courseId={courseId}
-                    course={course}
-                    updateCourse={updateCourse}
+                    mentorshipId={chatMentorshipId}
+                    level={selectedStep?.level || currentLevel}
+                    userRole="mentor"
                   />
                 </div>
               </div>
@@ -137,9 +137,9 @@ export default function MentorWorkspace () {
                 <h3 className="text-lg font-semibold text-white mb-3">Tasks</h3>
                 <div className="min-h-[180px] text-slate-400">
                   <TasksPanel
-                    roadmapStepId={selectedStep?.stepId || selectedStep?._id}
-                    course={course}
-                    updateCourse={updateCourse}
+                    roadmapStepId={selectedStep?.level || currentLevel}
+                    course={{ ...course, mentorshipId: chatMentorshipId, currentLevel }}
+                    userRole="mentor"
                   />
                 </div>
               </div>
@@ -161,6 +161,9 @@ export default function MentorWorkspace () {
               <h3 className='text-lg font-semibold mb-4 text-white'>Course Progress</h3>
               <p className='text-sm text-slate-400 mb-2'>
                 Current progress: {progress}%{workspace?.status === 'completed' ? ' (Completed)' : ''}
+              </p>
+              <p className='text-sm text-slate-400 mb-2'>
+                Current level: <span className="capitalize text-indigo-300">{currentLevel}</span>
               </p>
               <div className='w-full bg-slate-700 rounded-full h-3'>
                 <div

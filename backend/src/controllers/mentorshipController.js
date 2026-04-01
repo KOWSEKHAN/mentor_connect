@@ -33,6 +33,10 @@ export const mentorListMentees = async (req, res) => {
         status: m.status,
         domain: m.domain,
         progress: m.progress,
+        currentLevel: m.currentLevel || 'beginner',
+        levels: Array.isArray(m.levels) && m.levels.length
+          ? m.levels
+          : ['beginner', 'intermediate', 'advanced', 'master'],
         startedAt: m.startedAt,
       };
     });
@@ -66,6 +70,10 @@ export const menteeListMentors = async (req, res) => {
         status: m.status,
         domain: m.domain,
         progress: m.progress,
+        currentLevel: m.currentLevel || 'beginner',
+        levels: Array.isArray(m.levels) && m.levels.length
+          ? m.levels
+          : ['beginner', 'intermediate', 'advanced', 'master'],
         startedAt: m.startedAt,
       };
     });

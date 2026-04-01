@@ -1,116 +1,117 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import api from '../../../utils/api'
 import { showToast } from '../../../components/Toast'
 
 export default function AIContentView({
-  roadmapStepId,
-  courseId,
-  course,
-  updateCourse,
-  refreshCourse,
+  mentorshipId,
+  level,
+  userRole = 'mentee',
 }) {
   const [content, setContent] = useState('')
+  const [initialContent, setInitialContent] = useState('')
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [contentByStep, setContentByStep] = useState({})
+  const activeLevel = useMemo(() => (level || 'beginner').toLowerCase(), [level])
+  const isMentor = userRole === 'mentor'
 
-  const stepKey = roadmapStepId ? String(roadmapStepId) : null
-
-  useEffect(() => {
-    if (stepKey && contentByStep[stepKey]) {
-      setContent(contentByStep[stepKey])
-    } else if (course?.aiContent && !roadmapStepId) {
-      setContent(course.aiContent || '')
-    } else {
-      setContent(stepKey ? contentByStep[stepKey] || '' : course?.aiContent || '')
-    }
-  }, [stepKey, contentByStep, course?.aiContent, roadmapStepId])
-
-  useEffect(() => {
-    if (!roadmapStepId && course?.aiContent) setContent(course.aiContent || '')
-  }, [course])
-
-  const handleGenerate = async () => {
-    if (roadmapStepId) {
-      setLoading(true)
-      try {
-        const res = await api.post('/api/ai/generate-content', {
-          roadmapStepId,
-          courseId,
-        })
-        const newContent = res.data.content
-        setContent(newContent)
-        setContentByStep((prev) => ({ ...prev, [String(roadmapStepId)]: newContent }))
-        showToast('Content generated successfully!', 'success')
-      } catch (err) {
-        console.error('Failed to generate content:', err)
-        showToast(err.response?.data?.message || 'Failed to generate content', 'error')
-      } finally {
-        setLoading(false)
-      }
-      return
-    }
-    if (!courseId || !course) return
+  const fetchContent = async () => {
+    if (!mentorshipId) return
     setLoading(true)
     try {
-      const res = await api.post('/api/ai/generate-content', {
-        courseId,
-        domain: course.domain,
-        title: course.title,
+      const res = await api.get(`/api/structured/${mentorshipId}/content`, {
+        params: { level: activeLevel },
       })
-      const newContent = res.data.content
-      setContent(newContent)
-      await updateCourse?.({ aiContent: newContent })
+      const next = res.data?.content || ''
+      setContent(next)
+      setInitialContent(next)
+    } catch (err) {
+      console.error('Failed to load level content:', err)
+      setContent('')
+      setInitialContent('')
+      showToast(err.response?.data?.message || 'Failed to load AI content', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchContent()
+  }, [mentorshipId, activeLevel])
+
+  const handleGenerate = async () => {
+    if (!mentorshipId || !isMentor) return
+    setLoading(true)
+    try {
+      const res = await api.post(`/api/structured/${mentorshipId}/content`, {
+        level: activeLevel,
+      })
+      const next = res.data?.content || ''
+      setContent(next)
+      setInitialContent(next)
       showToast('Content generated successfully!', 'success')
     } catch (err) {
       console.error('Failed to generate content:', err)
-      showToast('Failed to generate content', 'error')
+      showToast(err.response?.data?.message || 'Failed to generate content', 'error')
     } finally {
       setLoading(false)
     }
   }
 
   const handleSave = async () => {
-    if (!updateCourse) return
+    if (!mentorshipId || !isMentor) return
     setSaving(true)
     try {
-      await updateCourse({ aiContent: content })
+      await api.post(`/api/structured/${mentorshipId}/content`, {
+        level: activeLevel,
+        content,
+      })
+      setInitialContent(content)
       showToast('Content saved!', 'success')
-    } catch {
-      showToast('Failed to save content', 'error')
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to save content', 'error')
     } finally {
       setSaving(false)
     }
   }
 
-  useEffect(() => {
-    if (!content || content === course?.aiContent || roadmapStepId) return
-    const timeoutId = setTimeout(() => {
-      updateCourse?.({ aiContent: content })
-    }, 2000)
-    return () => clearTimeout(timeoutId)
-  }, [content])
+  const handleReset = () => {
+    setContent(initialContent)
+  }
 
   return (
     <div className="h-full flex flex-col bg-gray-800 border border-gray-700 rounded-xl shadow-lg p-6 text-gray-300 min-h-0">
       <div className="flex justify-between items-center mb-4 flex-shrink-0">
-        <h3 className="text-xl font-semibold text-white">AI Content</h3>
+        <div>
+          <h3 className="text-xl font-semibold text-white">AI Content</h3>
+          <p className="text-xs text-gray-400 mt-1">
+            Level: <span className="capitalize text-indigo-300">{activeLevel}</span>
+          </p>
+        </div>
         <div className="space-x-2">
-          <button
-            onClick={handleGenerate}
-            disabled={loading}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-          >
-            {loading ? 'Generating...' : roadmapStepId ? 'Generate for step' : 'Regenerate'}
-          </button>
-          {!roadmapStepId && updateCourse && (
+          {isMentor && (
+            <button
+              onClick={handleGenerate}
+              disabled={loading}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              {loading ? 'Generating...' : 'Generate'}
+            </button>
+          )}
+          {isMentor && (
             <>
               <button
                 onClick={handleSave}
-                disabled={saving}
+                disabled={saving || loading}
                 className="px-4 py-2 border border-gray-700 rounded-lg hover:bg-gray-700/50 disabled:opacity-50"
               >
                 {saving ? 'Saving...' : 'Save'}
+              </button>
+              <button
+                onClick={handleReset}
+                disabled={saving || loading}
+                className="px-4 py-2 border border-gray-700 rounded-lg hover:bg-gray-700/50 disabled:opacity-50"
+              >
+                Reset
               </button>
             </>
           )}
@@ -121,7 +122,12 @@ export default function AIContentView({
         <textarea
           value={content}
           onChange={(e) => setContent(e.target.value)}
-          placeholder="AI-generated learning content will appear here. Generate content from a roadmap step or use Regenerate."
+          readOnly={!isMentor}
+          placeholder={
+            loading
+              ? 'Loading content...'
+              : 'No AI content generated for this level yet.'
+          }
           className="w-full h-full p-4 border border-gray-700 bg-gray-900 rounded-lg text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
         />
       </div>

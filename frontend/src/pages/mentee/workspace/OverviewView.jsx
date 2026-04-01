@@ -11,6 +11,10 @@ export default function OverviewView({ course }) {
             <p><span className="font-medium">Domain:</span> {course.domain}</p>
             <p><span className="font-medium">Mentor:</span> {course.mentor?.name}</p>
             <p><span className="font-medium">Progress:</span> {course.progress || 0}%</p>
+            <p>
+              <span className="font-medium">Current Level:</span>{' '}
+              <span className="capitalize">{course.currentLevel || 'beginner'}</span>
+            </p>
           </div>
         </div>
 
