@@ -1,153 +1,127 @@
-import axios from 'axios'
+import { generateAIResponse } from "./aiService.js";
+import { buildPrompt } from "./promptBuilder.js";
 
-const OLLAMA_GENERATE_URL = 'http://127.0.0.1:11434/api/generate'
-const MODEL = 'phi3'
-const FALLBACK_MODEL = 'phi:latest'
-const REQUEST_TIMEOUT_MS = 8000
+const cache = new Map();
+const pending = new Map();
+const MAX_CACHE_SIZE = 50;
 
-function SAFE_FALLBACK(title) {
-  return {
-    title: title || 'Learning Roadmap',
-    steps: [
-      {
-        order: 1,
-        level: 'beginner',
-        title: 'Introduction',
-        description: 'Start learning the basics',
-        subtopics: ['Overview'],
-      },
-    ],
-  }
-}
-
-function safeParseJSON(text) {
+function safeJsonParse(text) {
   try {
-    return JSON.parse(text)
-  } catch {
-    return null
+    if (!text) return null;
+
+    const cleaned = text
+      .replace(/```json/gi, "")
+      .replace(/```/g, "")
+      .trim();
+
+    return JSON.parse(cleaned);
+  } catch (err) {
+    console.error("JSON parse failed:", err);
+    return null;
   }
 }
 
-function extractJSON(text) {
-  const start = text.indexOf('{')
-  const end = text.lastIndexOf('}')
-  if (start !== -1 && end !== -1 && end > start) {
-    return text.substring(start, end + 1)
-  }
-  return text
+function validateRoadmap(data) {
+  if (!data || !Array.isArray(data.steps)) return false;
+
+  const validLevels = ["beginner", "intermediate", "advanced", "master"];
+
+  return data.steps.every(step =>
+    step.title &&
+    validLevels.includes(step.level) &&
+    typeof step.order === "number"
+  );
 }
 
-function cleanResponseText(text) {
-  if (text == null || typeof text !== 'string') return ''
-  let s = text.trim()
-  s = s.replace(/^```json\s*/i, '').replace(/^```\s*/i, '')
-  s = s.replace(/\s*```\s*$/i, '')
-  return s.trim()
-}
-
-function repairTrailingCommas(str) {
-  return str.replace(/,\s*([}\]])/g, '$1')
-}
-
-function parseRoadmapFromRaw(raw) {
-  const rawStr = String(raw)
-
-  let extracted = extractJSON(rawStr)
-  let cleaned = cleanResponseText(extracted)
-  let repaired = repairTrailingCommas(cleaned)
-  let parsed = safeParseJSON(repaired)
-
-  if (parsed === null) {
-    console.error('Phi parse failed')
-    return null
-  }
-
-  if (!parsed || !Array.isArray(parsed.steps) || parsed.steps.length === 0) {
-    console.error('Phi validation failed')
-    return null
-  }
-
-  const validLevels = ['beginner', 'intermediate', 'advanced', 'master']
+function normalizeRoadmap(data) {
+  const levelOrder = ["beginner", "intermediate", "advanced", "master"];
 
   return {
-    title: typeof parsed.title === 'string' ? parsed.title : '',
-    steps: parsed.steps.map((s, i) => ({
-      order: typeof s?.order === 'number' ? s.order : i + 1,
-      level: validLevels.includes(s?.level) ? s.level : 'beginner',
-      title: s?.title ? String(s.title) : 'Introduction',
-      description: s?.description ? String(s.description) : 'Start learning the basics',
-      subtopics: Array.isArray(s?.subtopics) ? s.subtopics.map(String) : ['Overview'],
-    })),
-  }
+    title: data.title || "Generated Roadmap",
+    steps: data.steps
+      .map((step, index) => ({
+        title: step.title || "Untitled",
+        level: levelOrder.includes(step.level) ? step.level : "beginner",
+        order: step.order ?? index + 1,
+        description: step.description || "Start learning the basics of this topic.",
+        subtopics: Array.isArray(step.subtopics) && step.subtopics.length > 0 ? step.subtopics : ["Overview"]
+      }))
+      .sort((a, b) => a.order - b.order)
+  };
 }
 
-async function callOllama({ model, prompt }) {
-  return axios.post(
-    OLLAMA_GENERATE_URL,
-    { model, prompt, stream: false },
-    { timeout: REQUEST_TIMEOUT_MS }
-  )
+function fallbackRoadmap(domain, courseTitle) {
+  return {
+    title: courseTitle || `${domain || 'Learning'} Roadmap`,
+    steps: [
+      { title: "Introduction", level: "beginner", order: 1, description: "Basic introduction to the fundamental concepts.", subtopics: ["Overview", "Getting Started"] },
+      { title: "Core Concepts", level: "intermediate", order: 2, description: "Understanding the core architecture and intermediate features.", subtopics: ["Core Theory", "Best Practices"] },
+      { title: "Advanced Topics", level: "advanced", order: 3, description: "Diving into advanced use cases and complex patterns.", subtopics: ["Advanced Use Cases", "Performance"] },
+      { title: "Mastery", level: "master", order: 4, description: "Reaching mastery through problem solving and architecture.", subtopics: ["Architecture", "System Design"] }
+    ]
+  };
 }
 
 export async function generateRoadmapFromPhi({ courseTitle, domain }) {
-  const title = courseTitle || 'Learning Roadmap'
-  const dom = domain || ''
+  const safeDomain = domain || "default";
+  const key = `roadmap:${safeDomain.toLowerCase().trim()}`;
 
-  const prompt = `Output STRICT JSON only. No markdown. No explanation text. No code fences.
-Exact schema:
-{
-  "title": string,
-  "steps": [
-    {
-      "order": number,
-      "level": "beginner" | "intermediate" | "advanced" | "master",
-      "title": string,
-      "description": string,
-      "subtopics": string[]
-    }
-  ]
-}
-Course title: ${title}
-Domain: ${dom}`
+  const cached = cache.get(key);
 
-  try {
-    const response = await callOllama({ model: MODEL, prompt })
-
-    const raw = response?.data?.response
-    if (!raw) {
-      console.error('Empty Phi response')
-      return SAFE_FALLBACK(title)
-    }
-
-    const parsed = parseRoadmapFromRaw(raw)
-    if (!parsed) return SAFE_FALLBACK(title)
-
-    if (!parsed.title) parsed.title = title
-    if (!Array.isArray(parsed.steps) || parsed.steps.length === 0) return SAFE_FALLBACK(title)
-    return parsed
-  } catch (error) {
-    const msg = error?.response?.data?.error || error?.message || ''
-    const isModelMissing = typeof msg === 'string' && msg.toLowerCase().includes('model') && msg.toLowerCase().includes('not found')
-    console.error('Phi retry triggered')
-    try {
-      const response = await callOllama({ model: isModelMissing ? FALLBACK_MODEL : MODEL, prompt })
-
-      const raw = response?.data?.response
-      if (!raw) {
-        console.error('Empty Phi response')
-        return SAFE_FALLBACK(title)
-      }
-
-      const parsed = parseRoadmapFromRaw(raw)
-      if (!parsed) return SAFE_FALLBACK(title)
-
-      if (!parsed.title) parsed.title = title
-      if (!Array.isArray(parsed.steps) || parsed.steps.length === 0) return SAFE_FALLBACK(title)
-      return parsed
-    } catch (err) {
-      console.error('Ollama call failed:', err.message)
-      return SAFE_FALLBACK(title)
-    }
+  if (cached && Date.now() - cached.createdAt < 1000 * 60 * 60) {
+    console.log("[AI] Cache hit:", key);
+    return cached.data;
   }
+
+  if (pending.has(key)) {
+    console.log("[AI] Waiting for existing request:", key);
+    return pending.get(key);
+  }
+
+  const promise = (async () => {
+    const prompt = buildPrompt({ type: "roadmap", domain });
+
+    const raw = await generateAIResponse(prompt);
+
+    const parsed = safeJsonParse(raw);
+
+    if (!parsed || !validateRoadmap(parsed)) {
+      console.warn("[AI] Fallback used:", domain);
+      return fallbackRoadmap(domain, courseTitle);
+    }
+
+    console.log("[AI] Generated via Ollama:", domain);
+
+    const result = normalizeRoadmap(parsed);
+
+    // Safely restore intended title if the AI generated something generic
+    if (result.title === "Generated Roadmap" && courseTitle) {
+      result.title = courseTitle;
+    }
+
+    return result;
+  })();
+
+  pending.set(key, promise);
+
+  const result = await promise;
+
+  pending.delete(key);
+
+  if (cache.size >= MAX_CACHE_SIZE) {
+    const firstKey = cache.keys().next().value;
+    cache.delete(firstKey);
+  }
+
+  cache.set(key, {
+    data: result,
+    createdAt: Date.now()
+  });
+
+  return result;
 }
 
+export async function generateStructuredContent({ type, level, domain, role }) {
+  const prompt = buildPrompt({ type, level, domain, role });
+  return await generateAIResponse(prompt);
+}
