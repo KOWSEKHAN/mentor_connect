@@ -8,13 +8,14 @@ const LEVEL_COLORS = {
 export default function LevelBadge({ level }) {
   const normalized = level ? String(level).toLowerCase() : 'beginner'
   const styles = LEVEL_COLORS[normalized] || LEVEL_COLORS.beginner
+  const label = (normalized || 'beginner').toUpperCase()
 
   return (
     <span
       className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${styles}`}
-      title={level}
+      title={label}
     >
-      {normalized.charAt(0).toUpperCase() + normalized.slice(1)}
+      {label}
     </span>
   )
 }

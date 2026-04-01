@@ -8,9 +8,9 @@ import connectDB from './src/config/db.js'
 import Message from './src/models/Message.js'
 import User from './src/models/User.js'
 import Mentorship from './src/models/Mentorship.js'
-import { getJwtSecret } from './src/config/jwt.js'
 
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173'
+const SECRET = process.env.JWT_SECRET
 
 import authRoutes from './src/routes/authRoutes.js'
 import mentorshipRoutes from './src/routes/mentorshipRoutes.js'
@@ -48,7 +48,7 @@ app.use(cors({
   origin: CLIENT_ORIGIN,
   credentials: true
 }))
-app.use(express.json())
+app.use(express.json({ limit: '1mb' }))
 
 app.use('/uploads', express.static('uploads'))
 
@@ -79,6 +79,7 @@ app.get('/', (req, res) => res.send('MentorConnect Backend is running'))
 
 const onlineUsers = new Map()
 const onlineCommunityUsers = new Map()
+const userSockets = new Map()
 
 const getRoomName = (mentorshipId) =>
   String(mentorshipId).startsWith('mentorship_')
@@ -97,38 +98,31 @@ const isMentorshipMember = async (mentorshipId, userId) => {
 }
 
 io.use((socket, next) => {
-  const token = socket.handshake.auth?.token
-
-  if (!token) {
-    socket.user = { role: 'guest' }
-    return next()
-  }
-
   try {
-    const decoded = jwt.verify(token, getJwtSecret())
+    const token = socket.handshake.auth?.token
+    if (!token) return next(new Error('No token'))
+    if (!SECRET) return next(new Error('Unauthorized'))
+
+    const decoded = jwt.verify(token, SECRET)
     socket.userId = (decoded.id?.toString?.() || decoded.id)
     socket.user = decoded
+    return next()
   } catch (err) {
-    console.warn('Socket auth decode failed:', {
-      message: err.message,
-      hasEnvSecret: Boolean(process.env.JWT_SECRET),
-      tokenLen: String(token).length,
-      tokenPrefix: String(token).slice(0, 16),
-    })
-    socket.user = { role: 'guest' }
+    console.error('Socket auth failed')
+    return next(new Error('Unauthorized'))
   }
-
-  next()
 })
 
 io.on('connection', (socket) => {
-  console.log('Socket connected:', socket.id)
   const uid = socket.userId
   if (uid) {
     socket.join(`user_${uid}`)
+    const existing = userSockets.get(uid) || new Set()
+    const wasEmpty = existing.size === 0
+    existing.add(socket.id)
+    userSockets.set(uid, existing)
     onlineUsers.set(uid, socket.id)
-    io.emit('user_online', uid)
-    console.log(`User ${uid} connected, socket: ${socket.id}`)
+    if (wasEmpty) io.emit('user_online', uid)
   }
   socket.emit('connected', { status: 'connected' })
 
@@ -158,7 +152,6 @@ io.on('connection', (socket) => {
     const roomName = getRoomName(id)
     socket.join(roomName)
     socket.emit('joined_chat', { mentorshipId: id, room: roomName })
-    console.log(`Socket ${socket.id} joined room: ${roomName}`)
   })
 
   socket.on('leave_chat', (payload = {}) => {
@@ -167,17 +160,15 @@ io.on('connection', (socket) => {
     if (!id) return
     const roomName = getRoomName(id)
     socket.leave(roomName)
-    console.log(`Socket ${socket.id} left room: ${roomName}`)
   })
 
   socket.on('send_message', async (data) => {
     const payload = data || {}
-    const { mentorshipId, receiverId, content } = payload
+    const { mentorshipId, content } = payload
     const mentId = mentorshipId
-
     try {
-      if (!mentId || !content || !receiverId) {
-        console.error('Invalid message payload:', payload)
+      if (!mentId || !content) {
+        console.error('Message error')
         socket.emit('error', { message: 'Missing required fields' })
         return
       }
@@ -208,10 +199,6 @@ io.on('connection', (socket) => {
       }
 
       const expectedReceiverId = senderId === mentorIdStr ? menteeIdStr : mentorIdStr
-      if (String(receiverId) !== expectedReceiverId) {
-        socket.emit('error', { message: 'Invalid receiver for mentorship' })
-        return
-      }
 
       const sender = await User.findById(senderId).select('name')
       const senderName = sender?.name || 'Unknown'
@@ -245,10 +232,8 @@ io.on('connection', (socket) => {
       const roomName = getRoomName(mentId)
 
       io.to(roomName).emit('receive_message', formattedMessage)
-
-      console.log(`Message ${msg._id} sent in room ${roomName} by ${senderName}`)
     } catch (err) {
-      console.error('Error handling send_message:', err)
+      console.error('Message error')
       socket.emit('error', { message: 'Failed to send message', error: err.message })
     }
   })
@@ -328,7 +313,6 @@ io.on('connection', (socket) => {
     socket.data.communityCourseId = courseId || 'global'
     const room = getCommunityRoomName(courseId)
     socket.join(room)
-    console.log(`Socket ${socket.id} joined ${room}`)
   })
 
   socket.on('sendCommunityMessage', async (data) => {
@@ -371,7 +355,6 @@ io.on('connection', (socket) => {
         reactions: msg.reactions || [],
         createdAt: msg.createdAt,
       })
-      console.log(`Community message broadcasted to ${room}`)
     } catch (err) {
       console.error('Community chat error:', err)
     }
@@ -514,24 +497,29 @@ io.on('connection', (socket) => {
   })
 
   socket.on('disconnect', async () => {
+    socket.leaveAll()
     const uid = socket.userId
     if (uid) {
-      onlineUsers.delete(uid)
-      onlineCommunityUsers.delete(uid)
-      try {
-        await User.findByIdAndUpdate(uid, { lastSeen: new Date() })
-      } catch (e) {
-        console.error('lastSeen update failed:', e.message)
+      const set = userSockets.get(uid)
+      if (set) set.delete(socket.id)
+      const hasRemaining = set && set.size > 0
+      if (!hasRemaining) {
+        userSockets.delete(uid)
+        onlineUsers.delete(uid)
+        onlineCommunityUsers.delete(uid)
+        try {
+          await User.findByIdAndUpdate(uid, { lastSeen: new Date() })
+        } catch (e) {
+          console.error('lastSeen update failed:', e.message)
+        }
+        io.emit('user_offline', uid)
+        const room = getCommunityRoomName(socket.data?.communityCourseId)
+        io.to(room).emit(
+          'community_users_online',
+          Array.from(onlineCommunityUsers.values())
+        )
       }
-      io.emit('user_offline', uid)
-      const room = getCommunityRoomName(socket.data?.communityCourseId)
-      io.to(room).emit(
-        'community_users_online',
-        Array.from(onlineCommunityUsers.values())
-      )
-      console.log(`User ${uid} offline`)
     }
-    console.log('Socket disconnected:', socket.id)
   })
 })
 

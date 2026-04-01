@@ -4,6 +4,7 @@ import RoadmapStep from '../models/RoadmapStep.js';
 import Course from '../models/Course.js';
 import Mentorship from '../models/Mentorship.js';
 import { startSafeSession } from '../../utils/dbSession.js';
+import { generateRoadmapFromPhi } from '../services/phiService.js';
 
 const LEVELS = ['beginner', 'intermediate', 'advanced', 'master'];
 
@@ -327,8 +328,6 @@ export const updateRoadmap = async (req, res) => {
  * Body: { courseId, menteeId, mentorId? (optional), domain? }
  */
 export const generateRoadmapAI = async (req, res) => {
-  const session = await startSafeSession();
-  const opts = session ? { session } : {};
   try {
     const { courseId, menteeId, mentorId, domain } = req.body;
 
@@ -339,29 +338,24 @@ export const generateRoadmapAI = async (req, res) => {
     const courseMenteeId = (course.mentee?._id || course.mentee).toString();
     if (courseMenteeId !== menteeId.toString()) return res.status(403).json({ message: 'menteeId does not match course' });
 
-    const aiPayload = await Promise.resolve({
-      title: course.title || 'AI Learning Roadmap',
-      steps: LEVELS.map((level, i) => ({
-        order: i + 1,
-        level,
-        title: `${level.charAt(0).toUpperCase() + level.slice(1)}: ${domain || course.domain || 'Core Topics'}`,
-        description: `Structured learning path for ${level} level.`,
-        subtopics: ['Fundamentals', 'Practice', 'Projects'],
-      })),
+    const aiPayload = await generateRoadmapFromPhi({
+      courseTitle: course.title || 'AI Learning Roadmap',
+      domain: domain || course.domain || '',
     });
+    if (!aiPayload?.steps || aiPayload.steps.length === 0) {
+      console.error('Empty roadmap from AI');
+    }
 
-    await Roadmap.updateMany({ courseId, menteeId, isActive: true }, { isActive: false }, opts);
+    await Roadmap.updateMany({ courseId, menteeId, isActive: true }, { isActive: false });
 
-    const versionQuery = Roadmap.findOne({ courseId, menteeId })
+    const latestRoadmap = await Roadmap.findOne({ courseId, menteeId })
       .sort({ version: -1 })
       .select('version')
       .lean();
-    if (session) versionQuery.session(session);
-    const latestRoadmap = await versionQuery;
     const nextVersion = latestRoadmap ? latestRoadmap.version + 1 : 1;
 
-    const roadmap = await Roadmap.create(
-      [{
+    const roadmap = await Roadmap.create([
+      {
         courseId,
         mentorshipId: course.mentorshipId || null,
         menteeId,
@@ -371,9 +365,8 @@ export const generateRoadmapAI = async (req, res) => {
         version: nextVersion,
         isActive: true,
         steps: [],
-      }],
-      opts
-    ).then((r) => r[0]);
+      },
+    ]).then((r) => r[0]);
 
     const stepsToCreate = aiPayload.steps.map((s) => ({
       roadmapId: roadmap._id,
@@ -389,39 +382,23 @@ export const generateRoadmapAI = async (req, res) => {
 
     let stepDocs;
     try {
-      stepDocs = await RoadmapStep.insertMany(stepsToCreate, opts);
+      stepDocs = await RoadmapStep.insertMany(stepsToCreate);
     } catch (stepErr) {
-      if (!session && roadmap) await Roadmap.findByIdAndDelete(roadmap._id).catch(() => {});
-      if (session) {
-        await session.abortTransaction().catch(() => {});
-        await session.endSession().catch(() => {});
-      }
-      console.error('Roadmap AI generation failed:', stepErr);
+      if (roadmap) await Roadmap.findByIdAndDelete(roadmap._id).catch(() => {});
+      console.error('Roadmap AI failed');
       return res.status(500).json({ message: 'Server error' });
     }
     if (stepDocs.length !== stepsToCreate.length) {
-      if (!session && roadmap) await Roadmap.findByIdAndDelete(roadmap._id).catch(() => {});
-      if (session) {
-        await session.abortTransaction().catch(() => {});
-        await session.endSession().catch(() => {});
-      }
+      if (roadmap) await Roadmap.findByIdAndDelete(roadmap._id).catch(() => {});
       throw new Error('RoadmapStep creation mismatch');
     }
     roadmap.steps = stepDocs.map((s) => s._id);
-    await roadmap.save(opts);
+    await roadmap.save();
 
-    if (session) {
-      await session.commitTransaction();
-      await session.endSession();
-    }
     const populated = await Roadmap.findById(roadmap._id).populate('steps').lean();
     return res.status(201).json(formatRoadmapResponse(populated));
   } catch (err) {
-    if (session) {
-      await session.abortTransaction().catch(() => {});
-      await session.endSession().catch(() => {});
-    }
-    console.error('Roadmap AI generation failed:', err);
+    console.error('Roadmap AI failed');
     return res.status(500).json({ message: 'Server error' });
   }
 };

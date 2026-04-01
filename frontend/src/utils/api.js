@@ -2,7 +2,9 @@ import axios from 'axios';
 
 const api = axios.create({
   baseURL: import.meta.env?.VITE_API_URL || 'http://localhost:5000',
+  timeout: 10000,
 });
+let redirectingToAuth = false;
 
 // Set default auth header if token already exists (session restore).
 try {
@@ -30,8 +32,12 @@ api.interceptors.response.use(
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       localStorage.removeItem('mc_user');
-      if (typeof window !== 'undefined') {
+      if (typeof window !== 'undefined' && !redirectingToAuth) {
+        redirectingToAuth = true;
         window.dispatchEvent(new CustomEvent('mc:unauthorized'));
+        if (window.location.pathname !== '/auth') {
+          window.location.href = '/auth';
+        }
       }
     }
     return Promise.reject(err);

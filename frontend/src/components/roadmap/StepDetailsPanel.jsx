@@ -39,18 +39,16 @@ export default function StepDetailsPanel({ step, courseId }) {
 
   const stepId = step.stepId || step._id
   const canGenerate = !step.aiContentGenerated
-  const subtopics = step.subtopics || []
+  const subtopics = Array.isArray(step.subtopics) ? step.subtopics : []
 
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-xl shadow-lg p-6 flex flex-col min-h-[180px] text-gray-300">
       <div className="flex items-center gap-2 mb-2">
-        <LevelBadge level={step.level} />
-        <span className="text-sm text-gray-300">Step {step.order}</span>
+        <LevelBadge level={step.level || 'beginner'} />
+        <span className="text-sm text-gray-300">Step {step.order ?? '—'}</span>
       </div>
-      <h3 className="text-lg font-semibold text-white mb-1">{step.title}</h3>
-      {step.description && (
-        <p className="text-sm text-gray-300 mb-3">{step.description}</p>
-      )}
+      <h3 className="text-lg font-semibold text-white mb-1">{step?.title || 'Untitled Step'}</h3>
+      <p className="text-sm text-gray-300 mb-3">{step?.description || 'No description available'}</p>
       {subtopics.length > 0 && (
         <ul className="text-sm text-gray-300 list-disc list-inside mb-4">
           {subtopics.map((s, i) => (

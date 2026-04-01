@@ -1,0 +1,3 @@
+MONGO_URI=mongodb+srv://livethasree:1511@cluster0.ad8grm5.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
+JWT_SECRET=livetha123456789securejwtsecret98765
+PORT=5000

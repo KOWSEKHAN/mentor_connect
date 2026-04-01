@@ -104,11 +104,12 @@ export default function RoadmapView({ courseId, userRole, onStepSelect, course =
   const showRegenerate = userRole === 'mentor'
   const canGenerate = !roadmap || roadmap.generatedBy !== 'mentor'
   const currentLevelIdx = Math.max(0, levels.indexOf(currentLevel))
+  const safeSteps = Array.isArray(steps) ? steps : []
 
   if (loading) {
     return (
       <div className="bg-gray-800 border border-gray-700 rounded-xl shadow-lg p-6 flex items-center justify-center min-h-[140px]">
-        <span className="text-gray-300">Loading roadmap...</span>
+        <span className="text-gray-300">Generating roadmap...</span>
       </div>
     )
   }
@@ -116,7 +117,7 @@ export default function RoadmapView({ courseId, userRole, onStepSelect, course =
   if (error) {
     return (
       <div className="bg-gray-800 border border-gray-700 rounded-xl shadow-lg p-6">
-        <p className="text-red-400 mb-2">{error}</p>
+        <p className="text-red-400 mb-2">Unable to generate roadmap. Please try again.</p>
         <button
           type="button"
           onClick={() => fetchRoadmap()}
@@ -161,8 +162,8 @@ export default function RoadmapView({ courseId, userRole, onStepSelect, course =
         </div>
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <span className="text-xs text-gray-400 uppercase tracking-wide">Current Level</span>
-          <span className="px-2.5 py-1 rounded-full bg-indigo-600/20 text-indigo-200 text-xs font-medium capitalize">
-            {currentLevel}
+          <span className="px-2.5 py-1 rounded-full bg-indigo-600/20 text-indigo-200 text-xs font-medium">
+            {(currentLevel || 'beginner').toUpperCase()}
           </span>
           <span className="text-xs text-gray-400 uppercase tracking-wide">Progress</span>
           <span className="px-2.5 py-1 rounded-full bg-emerald-600/20 text-emerald-200 text-xs font-medium">
@@ -174,17 +175,19 @@ export default function RoadmapView({ courseId, userRole, onStepSelect, course =
           <p className="text-gray-400 py-6 text-center">
             No roadmap yet. Click Generate to create one, or ask your mentor to create it.
           </p>
+        ) : safeSteps.length === 0 ? (
+          <p className="text-gray-400 py-6 text-center">No roadmap available</p>
         ) : (
           <div className="flex overflow-x-auto gap-4 snap-x snap-mandatory pb-4">
-            {steps.map((step) => {
-              const stepLevelIdx = Math.max(0, levels.indexOf(step.level))
+            {safeSteps.map((step) => {
+              const stepLevelIdx = Math.max(0, levels.indexOf(step?.level || 'beginner'))
               const isLocked = userRole === 'mentee' && stepLevelIdx > currentLevelIdx
               return (
               <StepCard
-                key={step.stepId || step._id}
+                key={step?.stepId || step?._id || String(step?.order)}
                 step={step}
                 isSelected={
-                  (selectedStep?.stepId || selectedStep?._id) === (step.stepId || step._id)
+                  (selectedStep?.stepId || selectedStep?._id) === (step?.stepId || step?._id)
                 }
                 isLocked={isLocked}
                 onClick={handleStepSelect}

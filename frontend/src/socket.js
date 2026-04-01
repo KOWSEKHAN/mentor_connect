@@ -10,11 +10,15 @@ function createSocket() {
     transports: ['websocket', 'polling'],
     autoConnect: false,
     reconnection: true,
-    reconnectionAttempts: Infinity,
+    reconnectionAttempts: 3,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 5000,
     withCredentials: true,
   });
+  socketInstance.on('connect_error', (err) => {
+    console.log('Socket error:', err?.message || String(err))
+    socketInstance.disconnect()
+  })
   return socketInstance;
 }
 
@@ -28,9 +32,10 @@ export function connectSocket() {
   const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
   if (!token) return;
   const s = createSocket();
+  if (s.connected) return;
   s.auth = { token };
   s.io.reconnection(true);
-  if (!s.connected) s.connect();
+  s.connect();
 }
 
 export function disconnectSocket() {

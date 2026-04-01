@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, memo } from 'react';
 import api from '../../../utils/api';
 import { socket } from '../../../socket';
 import { useAuth } from '../../../utils/auth';
 
-function MessageBubble({ message, isOwn, onSeen, children }) {
+const MessageBubble = memo(function MessageBubble({ message, isOwn, onSeen, children }) {
   const ref = useRef(null);
   const seenEmitted = useRef(false);
   useEffect(() => {
@@ -23,7 +23,7 @@ function MessageBubble({ message, isOwn, onSeen, children }) {
     return () => observer.disconnect();
   }, [message._id, isOwn, onSeen]);
   return <div ref={ref} className="inline-block">{children}</div>;
-}
+});
 
 export default function MentorshipChat({ course, mentorshipId, userId, userName }) {
   const { user } = useAuth();
@@ -73,6 +73,9 @@ export default function MentorshipChat({ course, mentorshipId, userId, userName 
       setConnected(true);
       socket.emit('joinRoom', { mentorshipId });
     };
+    const token = localStorage.getItem('token');
+    socket.auth = { token: token || '' };
+    if (!socket.connected && token) socket.connect();
     socket.on('connected', onConnected);
     if (socket.connected) onConnected();
 
@@ -160,11 +163,7 @@ export default function MentorshipChat({ course, mentorshipId, userId, userName 
     if (!input.trim() || !mentorshipId || !currentUserId) return;
     const messageText = input.trim();
     setInput('');
-    const senderRole = mentorId && currentUserId === mentorId ? 'mentor' : 'mentee';
-    const receiverId = senderRole === 'mentee' ? mentorId : menteeId;
-    if (!receiverId) return;
     socket.emit('send_message', {
-      receiverId,
       mentorshipId,
       content: messageText,
     });

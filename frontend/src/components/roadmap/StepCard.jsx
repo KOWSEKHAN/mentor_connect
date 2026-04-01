@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import LevelBadge from './LevelBadge'
 import ProgressBar from './ProgressBar'
 
@@ -16,7 +17,7 @@ function getStatus(step, isLocked) {
   return 'available'
 }
 
-export default function StepCard({ step, isSelected, isLocked, onClick }) {
+function StepCard({ step, isSelected, isLocked, onClick }) {
   if (!step) return null
 
   const status = getStatus(step, isLocked)
@@ -33,14 +34,15 @@ export default function StepCard({ step, isSelected, isLocked, onClick }) {
       className={`${base} ${selected} text-left`}
     >
       <div className="flex items-center justify-between gap-2 mb-2">
-        <LevelBadge level={step.level} />
+        <LevelBadge level={step.level || 'beginner'} />
         {step.aiContentGenerated && (
           <span className="text-xs text-gray-300" title="Content generated">✓</span>
         )}
       </div>
-      <h4 className="font-medium text-white truncate mb-2" title={step.title}>
-        {step.title}
+      <h4 className="font-medium text-white truncate mb-2" title={step?.title || 'Untitled Step'}>
+        {step?.title || 'Untitled Step'}
       </h4>
+      <p className="text-xs text-gray-400 line-clamp-2 mb-2">{step?.description || 'No description available'}</p>
       <ProgressBar progress={step.progress} />
       <p className="text-xs text-gray-300 mt-2">
         {status === 'completed' ? 'Completed' : status === 'inProgress' ? 'In progress' : 'Not started'}
@@ -48,3 +50,5 @@ export default function StepCard({ step, isSelected, isLocked, onClick }) {
     </button>
   )
 }
+
+export default memo(StepCard)
