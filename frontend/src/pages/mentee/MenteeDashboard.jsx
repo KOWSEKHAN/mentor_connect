@@ -38,20 +38,31 @@ export default function MenteeDashboard(){
   const [findMentors, setFindMentors] = useState([])
   const [loadingFindMentors, setLoadingFindMentors] = useState(false)
 
+  // Mentee Requests
+  const [myRequests, setMyRequests] = useState([])
+  const [loadingRequests, setLoadingRequests] = useState(false)
+  const [actionLoading, setActionLoading] = useState(null)
+
+  // Razorpay Recharge
+  const [showRechargeModal, setShowRechargeModal] = useState(false)
+  const [rechargeAmount, setRechargeAmount] = useState('')
+  const [recharging, setRecharging] = useState(false)
+
   // Fetch courses on mount
   useEffect(() => {
     fetchCourses()
     fetchRecommendations()
     fetchFindMentors()
+    fetchMyRequests()
   }, [])
 
   useEffect(() => {
     let cancelled = false
     api
-      .get('/api/points/summary')
+      .get('/api/wallet/me')
       .then((res) => {
         if (cancelled) return
-        const bal = res.data?.balance ?? 0
+        const bal = ((res.data?.wallet?.balance ?? 0) / 100).toFixed(2)
         updateUser?.({ points: bal })
       })
       .catch(() => {})
@@ -59,6 +70,103 @@ export default function MenteeDashboard(){
       cancelled = true
     }
   }, [])
+
+  const fetchMyRequests = async () => {
+    setLoadingRequests(true)
+    try {
+      const res = await api.get('/api/mentorship/my/requests')
+      setMyRequests(res.data.requests || [])
+    } catch (err) {
+      console.error('Failed to fetch requests:', err)
+    } finally {
+      setLoadingRequests(false)
+    }
+  }
+
+  const handleAcceptAndPay = async (reqId) => {
+    if (actionLoading) return; // Immediate bounce guard
+    setActionLoading(reqId)
+    try {
+      await api.post(`/api/mentorship/requests/${reqId}/accept-and-pay`)
+      showToast('Payment successful! Mentorship created.', 'success')
+      await fetchMyRequests()
+      await fetchCourses()
+      
+      const userRes = await api.get('/api/wallet/me')
+      updateUser?.({ points: ((userRes.data?.wallet?.balance ?? 0) / 100).toFixed(2) })
+    } catch (err) {
+      console.error(err)
+      showToast(err.response?.data?.message || 'Payment failed', 'error')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const loadRazorpayScript = () => {
+    return new Promise((resolve) => {
+      if (window.Razorpay) return resolve(true);
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
+  const handleRechargeWallet = async () => {
+    if (recharging) return;
+    const amount = Number(rechargeAmount);
+    if (!amount || amount < 10) {
+      showToast('Minimum recharge amount is 10 INR', 'error');
+      return;
+    }
+
+    setRecharging(true);
+    try {
+      const isLoaded = await loadRazorpayScript();
+      if (!isLoaded) {
+        showToast('Razorpay SDK failed to load. Are you online?', 'error');
+        setRecharging(false);
+        return;
+      }
+
+      // Create remote order natively
+      const res = await api.post('/api/payment/create-order', { amount });
+      const { orderId, amount: rpAmount, currency } = res.data;
+
+      const options = {
+        key: import.meta.env.VITE_RAZORPAY_KEY_ID, // Public key only — loaded from frontend/.env
+        amount: rpAmount,
+        currency: currency,
+        name: "MentorConnect Wallet",
+        description: "Recharge Points",
+        order_id: orderId,
+        handler: function (response) {
+          // Success occurs locally, wait for backend webhook dynamically
+          showToast('Payment successful! Points will appear momentarily via Webhook sync.', 'success');
+          setShowRechargeModal(false);
+          setRechargeAmount('');
+        },
+        prefill: {
+          name: user?.name,
+          email: user?.email
+        },
+        theme: {
+          color: "#4f46e5"
+        }
+      };
+
+      const rp = new window.Razorpay(options);
+      rp.on('payment.failed', function (response){
+        showToast(response.error.description || 'Payment Failed', 'error');
+      });
+      rp.open();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to initialize payment', 'error');
+    } finally {
+      setRecharging(false);
+    }
+  }
 
   const fetchCourses = async () => {
     try {
@@ -169,12 +277,10 @@ export default function MenteeDashboard(){
       const res = await api.post('/api/course/start', payload)
       showToast(res.data.message || 'Course started successfully!', 'success')
       
-      // Immediately add the new course to local state
       if (res.data.course) {
         setCourses(prevCourses => [...prevCourses, res.data.course])
       }
       
-      // Reset form
       setCourseQuery('')
       setMentorQuery('')
       setSelectedCourse(null)
@@ -182,8 +288,8 @@ export default function MenteeDashboard(){
       setCourseSuggestions([])
       setMentorSuggestions([])
       
-      // Also refresh courses list to ensure consistency
       fetchCourses()
+      fetchMyRequests()
     } catch (err) {
       const errorMsg = err.response?.data?.message || 'Error starting course'
       showToast(errorMsg, 'error')
@@ -216,8 +322,8 @@ export default function MenteeDashboard(){
       setCourseToAssign(null)
       setSelectedMentor(null)
       setMentorQuery('')
-      // Refresh courses
       fetchCourses()
+      fetchMyRequests()
     } catch (err) {
       console.error('Failed to assign mentor:', err)
       showToast(err.response?.data?.message || 'Failed to assign mentor', 'error')
@@ -266,11 +372,53 @@ export default function MenteeDashboard(){
               {courses.length ? Math.round(courses.reduce((a, c) => a + (c.progress || 0), 0) / courses.length) : 0}%
             </p>
           </div>
-          <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 shadow-xl hover:scale-[1.02] transition-all duration-200">
-            <p className="text-sm text-slate-400">Points balance</p>
-            <p className="text-3xl font-semibold text-amber-300 mt-1 tabular-nums">{user?.points ?? 0}</p>
+          <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 shadow-xl hover:scale-[1.02] transition-all duration-200 flex flex-col justify-between">
+            <div>
+              <p className="text-sm text-slate-400">Points balance</p>
+              <p className="text-3xl font-semibold text-amber-300 mt-1 tabular-nums">{user?.points ?? 0}</p>
+            </div>
+            <button
+              onClick={() => setShowRechargeModal(true)}
+              className="mt-4 py-1.5 px-3 bg-slate-700 hover:bg-slate-600 text-white text-sm rounded-lg transition-colors border border-slate-600"
+            >
+              + Recharge Wallet
+            </button>
           </div>
         </section>
+        
+        {/* Recharge Modal overlay */}
+        {showRechargeModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+            <Card className="max-w-md w-full mx-4 text-slate-100 bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl shadow-xl p-8">
+              <h3 className="text-xl font-semibold mb-4">Recharge Wallet Points</h3>
+              <p className="text-sm text-slate-400 mb-6">1 INR = 1 Point. Recharge securely using UPI or Cards.</p>
+              <input
+                type="number"
+                placeholder="Enter amount (INR)"
+                value={rechargeAmount}
+                onChange={(e) => setRechargeAmount(e.target.value)}
+                min="10"
+                className="w-full p-3 mb-6 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-400 focus:outline-none focus:border-indigo-500 transition-colors"
+                autoFocus
+              />
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowRechargeModal(false)}
+                  className="px-4 py-2 border border-slate-700 rounded-xl hover:bg-white/5 transition-colors text-slate-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleRechargeWallet}
+                  disabled={recharging}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                >
+                  {recharging ? 'Processing...' : 'Pay with Razorpay'}
+                </button>
+              </div>
+            </Card>
+          </div>
+        )}
         
         {/* Section 1: Start a New Course */}
         <section className="mb-8">
@@ -414,6 +562,50 @@ export default function MenteeDashboard(){
             )}
           </Card>
         </section>
+
+        {/* Section: My Pending Mentor Requests */}
+        {myRequests.length > 0 && (
+          <section className="mb-8">
+            <h3 className="font-semibold text-xl mb-4 text-white">Pending Mentor Requests</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {myRequests.map((req) => (
+                <Card key={req._id} className="text-slate-100 bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 shadow-xl">
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <h4 className="font-semibold text-lg text-white">
+                        {req.mentor?.name || 'Unknown Mentor'}
+                      </h4>
+                      <p className="text-sm text-slate-400">{req.domain || 'General domain'}</p>
+                    </div>
+                    {req.status === 'pending' ? (
+                      <span className="px-2 py-1 text-xs rounded-full bg-yellow-500/20 text-yellow-300 border border-yellow-500/30">
+                        Waiting for mentor
+                      </span>
+                    ) : req.status === 'price_set' ? (
+                      <span className="px-2 py-1 text-xs rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                        Price set: {req.coursePrice} points
+                      </span>
+                    ) : null}
+                  </div>
+                  {req.message && (
+                    <p className="text-sm text-slate-300 mb-4 line-clamp-2">"{req.message}"</p>
+                  )}
+                  {req.status === 'price_set' && (
+                    <div className="mt-auto">
+                      <button
+                        onClick={() => handleAcceptAndPay(req._id)}
+                        disabled={actionLoading === req._id}
+                        className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition-colors text-sm disabled:opacity-50 font-medium"
+                      >
+                        {actionLoading === req._id ? 'Processing...' : `Accept & Pay (${req.coursePrice} pts)`}
+                      </button>
+                    </div>
+                  )}
+                </Card>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* Section 2: My Courses */}
         <section className="mb-8">

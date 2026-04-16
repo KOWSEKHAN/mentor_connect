@@ -94,7 +94,7 @@ export const updateCourse = async (req, res) => {
   try {
     const { courseId } = req.params;
     const userId = req.user._id;
-    const { aiContent, roadmap, tasks, notes, progress } = req.body;
+    const { aiContent, roadmap, tasks, notes, progress, currentLevel } = req.body;
 
     const course = await Course.findById(courseId);
     if (!course) return res.status(404).json({ message: 'Course not found' });
@@ -128,10 +128,27 @@ export const updateCourse = async (req, res) => {
       }
     }
 
+    let levelDidUpdate = false;
+    if (currentLevel !== undefined && course.currentLevel !== currentLevel) {
+      if (userId.toString() !== mentorId && mentorId !== null) {
+        return res.status(403).json({ message: 'Only mentor can update level' });
+      }
+      course.currentLevel = currentLevel;
+      levelDidUpdate = true;
+    }
+
     const nowComplete = course.status === 'completed' || (course.progress ?? 0) >= 100;
 
     course.updatedAt = new Date();
     await course.save();
+
+    if (levelDidUpdate) {
+      const { emitCourseEvent } = await import('../socket/eventBuilder.js');
+      await emitCourseEvent('level_updated', course._id, {
+        courseId: course._id.toString(),
+        currentLevel: course.currentLevel
+      });
+    }
 
     if (tasks !== undefined) {
       const mentorRef = course.mentor || course.mentorId;
@@ -401,7 +418,6 @@ export const startCourse = async (req, res) => {
             mentorId: mentor._id,
             menteeId,
             domain: courseDomain || '',
-            status: 'pending',
             startedAt: new Date(),
           },
           $set: {

@@ -1,5 +1,6 @@
 import { generateAIResponse } from "./aiService.js";
 import { buildPrompt } from "./promptBuilder.js";
+import { metrics } from "../observability/metrics.js";
 
 const cache = new Map();
 const pending = new Map();
@@ -87,6 +88,7 @@ export async function generateRoadmapFromPhi({ courseTitle, domain }) {
 
     if (!parsed || !validateRoadmap(parsed)) {
       console.warn("[AI] Fallback used:", domain);
+      metrics.inc("ai_fallbacks");
       return fallbackRoadmap(domain, courseTitle);
     }
 

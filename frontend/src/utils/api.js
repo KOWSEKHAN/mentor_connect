@@ -8,7 +8,7 @@ let redirectingToAuth = false;
 
 // Set default auth header if token already exists (session restore).
 try {
-  const existingToken = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
+  const existingToken = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('token') : null;
   if (existingToken) {
     api.defaults.headers.common.Authorization = `Bearer ${existingToken}`;
   }
@@ -17,7 +17,7 @@ try {
 }
 
 api.interceptors.request.use((config) => {
-  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
+  const token = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('token') : null;
   if (token) {
     config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${token}`;
@@ -29,9 +29,9 @@ api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      localStorage.removeItem('mc_user');
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.clear();
+      }
       if (typeof window !== 'undefined' && !redirectingToAuth) {
         redirectingToAuth = true;
         window.dispatchEvent(new CustomEvent('mc:unauthorized'));

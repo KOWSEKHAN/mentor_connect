@@ -37,13 +37,23 @@ export default function Profile() {
   const [resumeFile, setResumeFile] = useState(null)
   const [pointLedger, setPointLedger] = useState({ balance: 0, transactions: [] })
   const [pointsLoading, setPointsLoading] = useState(false)
+  const [recharging, setRecharging] = useState(false)
 
   const fetchPointsLedger = async () => {
     setPointsLoading(true)
     try {
-      const res = await api.get('/api/points')
-      const balance = res.data?.balance ?? 0
-      setPointLedger({ balance, transactions: res.data?.transactions || [] })
+      const [walletRes, txRes] = await Promise.all([
+        api.get('/api/wallet/me'),
+        api.get('/api/wallet/transactions')
+      ])
+      const balance = ((walletRes.data?.wallet?.balance ?? 0) / 100).toFixed(2)
+      
+      const scaledTransactions = (txRes.data?.transactions || []).map(tx => ({
+        ...tx,
+        amount: (tx.amount / 100).toFixed(2)
+      }))
+
+      setPointLedger({ balance, transactions: scaledTransactions })
       updateUser?.({ points: balance })
     } catch (err) {
       console.error('Failed to load points:', err)
@@ -52,9 +62,23 @@ export default function Profile() {
     }
   }
 
+  const handleRecharge = async () => {
+    const amount = prompt("Enter amount to recharge via UPI:")
+    if (!amount || isNaN(amount) || amount <= 0) return
+    setRecharging(true)
+    try {
+      await api.post('/api/wallet/recharge', { amount: Number(amount) })
+      showToast('Recharge successful', 'success')
+      fetchPointsLedger()
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to recharge', 'error')
+    } finally {
+      setRecharging(false)
+    }
+  }
+
   useEffect(() => {
     if (!authUser) return
-    // Prevent role/profile mixups when switching users without full reload.
     if (authUser.role && authUser.role !== 'mentee') {
       navigate('/mentor', { replace: true })
       return
@@ -123,9 +147,7 @@ export default function Profile() {
 
       showToast('Profile updated successfully!', 'success')
       
-      // Update local state
       if (res.data.user) {
-        // Keep global auth user in sync (header/sidebar/etc.)
         updateUser?.({
           name: res.data.user.name,
           email: res.data.user.email,
@@ -143,7 +165,6 @@ export default function Profile() {
         setInterestsInput((res.data.user.interests || []).join(', '))
       }
 
-      // Clear file inputs
       setProfilePhotoFile(null)
       setResumeFile(null)
     } catch (err) {
@@ -198,7 +219,6 @@ export default function Profile() {
             <h2 className="text-2xl font-semibold mb-6 text-slate-100">My Profile</h2>
 
             <Card className="bg-slate-800/80 border-slate-700 text-slate-100">
-              {/* Profile summary: Avatar, Name, Role, Skills */}
               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 pb-6 border-b border-slate-700 mb-6">
                 <div className="flex-shrink-0">
                   {profile.profilePhoto ? (
@@ -219,7 +239,7 @@ export default function Profile() {
                   {profile.interests.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-2">
                       {profile.interests.map((interest, idx) => (
-                        <span
+                         <span
                           key={idx}
                           className="px-2 py-1 bg-indigo-600/30 text-indigo-300 rounded-full text-xs"
                         >
@@ -234,18 +254,28 @@ export default function Profile() {
               <div className="mb-6 p-4 rounded-xl bg-slate-900/50 border border-slate-700">
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <p className="text-sm text-slate-400">Points balance</p>
+                    <p className="text-sm text-slate-400">Wallet Balance</p>
                     <p className="text-2xl font-semibold text-amber-300 tabular-nums">
-                      {pointsLoading ? '…' : pointLedger.balance}
+                      {pointsLoading ? '…' : pointLedger.balance} Points
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => fetchPointsLedger()}
-                    className="text-sm text-indigo-400 hover:text-indigo-300"
-                  >
-                    Refresh
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleRecharge}
+                      disabled={recharging}
+                      className="px-3 py-1.5 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+                    >
+                      {recharging ? 'Processing...' : 'Recharge Wallet'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => fetchPointsLedger()}
+                      className="px-3 py-1.5 text-sm bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
+                    >
+                      Refresh
+                    </button>
+                  </div>
                 </div>
                 <div className="mt-4 max-h-48 overflow-y-auto border-t border-slate-700 pt-3">
                   <p className="text-xs text-slate-500 uppercase tracking-wide mb-2">Recent activity</p>
@@ -259,14 +289,12 @@ export default function Profile() {
                           className="flex justify-between gap-2 text-slate-300"
                         >
                           <span>
-                            {tx.points > 0 ? '+' : ''}
-                            {tx.points}{' '}
-                            <span className="text-slate-500">
-                              {TX_LABEL[tx.type] || tx.type}
+                            <span className={`font-medium ${tx.type === 'credit' ? 'text-green-400' : 'text-red-400'}`}>
+                              {tx.type === 'credit' ? '+' : '-'}{tx.amount}
                             </span>
-                            {tx.description ? (
-                              <span className="text-slate-500"> — {tx.description}</span>
-                            ) : null}
+                            <span className="text-slate-500 ml-2">
+                              {tx.reason.replace(/_/g, ' ')}
+                            </span>
                           </span>
                           <span className="text-slate-500 whitespace-nowrap tabular-nums">
                             {tx.createdAt

@@ -41,6 +41,12 @@ export default function MentorDashboard () {
   const [mentees, setMentees] = useState([])
   const [loading, setLoading] = useState({ requests: false, mentees: false })
   const [actionLoading, setActionLoading] = useState(null)
+  
+  // Wallet
+  const [wallet, setWallet] = useState({ balance: 0, totalEarned: 0 })
+  const [withdrawing, setWithdrawing] = useState(false)
+  const [showWithdrawModal, setShowWithdrawModal] = useState(false)
+  const [withdrawForm, setWithdrawForm] = useState({ amount: '', upiId: '', phone: '' })
 
   const updateStatsCounts = useCallback((data, type) => {
     if (type === 'requests') {
@@ -56,7 +62,8 @@ export default function MentorDashboard () {
     setLoading(prev => ({ ...prev, requests: true }))
     try {
       const res = await api.get('/api/mentorship/requests')
-      const reqs = res.data.requests || []
+      // Only show pending or price_set requests to mentor? No, mentor shouldn't re-action "price_set" items.
+      const reqs = res.data.requests?.filter(r => r.status === 'pending') || []
       setPendingRequests(reqs)
       updateStatsCounts(reqs, 'requests')
     } catch (err) {
@@ -70,7 +77,6 @@ export default function MentorDashboard () {
   const fetchMentees = useCallback(async () => {
     setLoading(prev => ({ ...prev, mentees: true }))
     try {
-      // Use /api/mentorships/mentor endpoint (single source of truth)
       const res = await api.get('/api/mentorships/mentor')
       const menteeList = res.data.mentorships || []
       setMentees(menteeList)
@@ -83,35 +89,35 @@ export default function MentorDashboard () {
     }
   }, [updateStatsCounts])
 
-  const refreshDashboard = useCallback(() => {
+  const fetchWallet = async () => {
+    try {
+      const res = await api.get('/api/wallet/me')
+      setWallet({ 
+        balance: ((res.data.wallet?.balance || 0) / 100).toFixed(2),
+        totalEarned: ((res.data.wallet?.totalEarned || 0) / 100).toFixed(2)
+      })
+      updateUser?.({ points: ((res.data.wallet?.balance || 0) / 100).toFixed(2) })
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  const refreshDashboard = () => {
     fetchPendingRequests()
     fetchMentees()
-  }, [fetchPendingRequests, fetchMentees])
+    fetchWallet()
+  }
 
   useEffect(() => {
     refreshDashboard()
-  }, [refreshDashboard])
-
-  useEffect(() => {
-    let cancelled = false
-    api
-      .get('/api/points/summary')
-      .then((res) => {
-        if (cancelled) return
-        updateUser?.({ points: res.data?.balance ?? 0 })
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleRequestAction = async (requestId, action) => {
     try {
       setActionLoading(`${requestId}-${action}`)
       await api.post(`/api/mentorship/requests/${requestId}/${action}`)
-      showToast(action === 'accept' ? 'Request accepted!' : 'Request rejected.', 'success')
-      // Refetch both pending requests and active mentees after accepting
+      showToast(action === 'accept' ? 'Request accepted (Free)!' : 'Request rejected.', 'success')
       await fetchPendingRequests()
       await fetchMentees()
     } catch (err) {
@@ -120,6 +126,54 @@ export default function MentorDashboard () {
       showToast(msg, 'error')
     } finally {
       setActionLoading(null)
+    }
+  }
+
+  const handleSetPrice = async (requestId) => {
+    const amountStr = prompt("Enter the point price for this Mentorship Course (e.g. 500):")
+    if (!amountStr || isNaN(amountStr) || Number(amountStr) <= 0) return
+    
+    try {
+      setActionLoading(`${requestId}-price`)
+      await api.post(`/api/mentorship/requests/${requestId}/set-price`, { price: Number(amountStr) })
+      showToast('Price set! Waiting for Mentee payment.', 'success')
+      await fetchPendingRequests()
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to set price', 'error')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const submitWithdrawal = async () => {
+    if (withdrawing) return
+    const { amount, upiId, phone } = withdrawForm;
+    const numAmount = Number(amount);
+
+    if (!numAmount || numAmount < 100) {
+      showToast('Minimum withdrawal is 100 pts', 'error')
+      return
+    }
+    if (numAmount > wallet.balance) {
+      showToast('Insufficient balance', 'error')
+      return
+    }
+    if (!upiId || !phone) {
+      showToast('UPI ID and Phone are clearly required', 'error')
+      return
+    }
+
+    setWithdrawing(true)
+    try {
+      await api.post('/api/wallet/withdraw', { amount: numAmount, upiId, phone })
+      showToast('Withdrawal successful! Payout generated safely.', 'success')
+      setShowWithdrawModal(false)
+      setWithdrawForm({ amount: '', upiId: '', phone: '' })
+      fetchWallet()
+    } catch (err) {
+       showToast(err.response?.data?.message || 'Withdrawal failed', 'error')
+    } finally {
+      setWithdrawing(false)
     }
   }
 
@@ -177,18 +231,87 @@ export default function MentorDashboard () {
                   </div>
                 </div>
               ))}
-              <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 flex items-center gap-4 hover:scale-[1.02] transition-all duration-200 shadow-xl">
-                <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center text-2xl">
-                  ⭐
+              <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 flex items-center justify-between hover:scale-[1.02] transition-all duration-200 shadow-xl">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center text-2xl">
+                    ⭐
+                  </div>
+                  <div>
+                    <p className="text-sm text-slate-400">Total Earned</p>
+                    <p className="text-3xl font-semibold text-amber-300 tabular-nums">{wallet.totalEarned}</p>
+                    <p className="text-xs text-slate-500 mt-1">Available Balance: {wallet.balance}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm text-slate-400">Points balance</p>
-                  <p className="text-3xl font-semibold text-amber-300 tabular-nums">{user?.points ?? 0}</p>
-                </div>
+                <button
+                  onClick={() => setShowWithdrawModal(true)}
+                  disabled={withdrawing || wallet.balance < 100}
+                  className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-xl disabled:opacity-50 text-sm transition-colors cursor-pointer"
+                >
+                  Withdraw
+                </button>
               </div>
             </>
           )}
         </section>
+
+        {/* Withdraw Modal overlay */}
+        {showWithdrawModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+            <Card className="max-w-md w-full mx-4 text-slate-100 bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl shadow-xl p-8">
+              <h3 className="text-xl font-semibold mb-4 text-white">Withdraw Funds (UPI)</h3>
+              <p className="text-sm text-slate-400 mb-6">Minimum withdrawal is 100 pts. Funds are routed directly via Razorpay Payouts.</p>
+              
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Amount (Max: {wallet.balance})</label>
+                  <input
+                    type="number"
+                    placeholder="E.g. 500"
+                    value={withdrawForm.amount}
+                    onChange={(e) => setWithdrawForm({ ...withdrawForm, amount: e.target.value })}
+                    className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">UPI ID</label>
+                  <input
+                    type="text"
+                    placeholder="name@upi"
+                    value={withdrawForm.upiId}
+                    onChange={(e) => setWithdrawForm({ ...withdrawForm, upiId: e.target.value })}
+                    className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Phone Number (Required by Bank)</label>
+                  <input
+                    type="text"
+                    placeholder="10 digit format"
+                    value={withdrawForm.phone}
+                    onChange={(e) => setWithdrawForm({ ...withdrawForm, phone: e.target.value })}
+                    className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowWithdrawModal(false)}
+                  className="px-4 py-2 border border-slate-700 rounded-xl hover:bg-white/5 transition-colors text-slate-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={submitWithdrawal}
+                  disabled={withdrawing}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                >
+                  {withdrawing ? 'Processing...' : 'Submit Payout'}
+                </button>
+              </div>
+            </Card>
+          </div>
+        )}
 
         {/* Section 2: Pending Requests */}
         <section className='mb-8'>
@@ -217,18 +340,25 @@ export default function MentorDashboard () {
                         </p>
                       )}
                     </div>
-                    <div className='flex gap-2'>
+                    <div className='flex flex-wrap gap-2 md:justify-end'>
                       <button
                         onClick={() => handleRequestAction(req._id, 'accept')}
                         disabled={actionLoading === `${req._id}-accept`}
-                        className='px-4 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-60 transition-colors'
+                        className='px-3 py-1.5 text-sm bg-slate-700 text-white rounded-lg hover:bg-slate-600 disabled:opacity-60 transition-colors'
                       >
-                        {actionLoading === `${req._id}-accept` ? 'Accepting...' : 'Accept'}
+                        {actionLoading === `${req._id}-accept` ? 'Accepting...' : 'Accept Free'}
+                      </button>
+                      <button
+                        onClick={() => handleSetPrice(req._id)}
+                        disabled={actionLoading === `${req._id}-price`}
+                        className='px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-60 transition-colors'
+                      >
+                        {actionLoading === `${req._id}-price` ? 'Setting...' : 'Set Price'}
                       </button>
                       <button
                         onClick={() => handleRequestAction(req._id, 'reject')}
                         disabled={actionLoading === `${req._id}-reject`}
-                        className='px-4 py-2 bg-red-500 text-white rounded-xl hover:bg-red-600 disabled:opacity-60 transition-colors'
+                        className='px-3 py-1.5 text-sm bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg hover:bg-red-500/30 hover:text-red-300 disabled:opacity-60 transition-colors'
                       >
                         {actionLoading === `${req._id}-reject` ? 'Rejecting...' : 'Reject'}
                       </button>

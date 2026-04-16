@@ -46,7 +46,7 @@ export default function CommunityChat() {
       socket.emit('joinCommunityRoom', { courseId });
     };
 
-    const token = localStorage.getItem('token');
+    const token = sessionStorage.getItem('token');
     socket.auth = { token: token || '' };
     if (!socket.connected && token) socket.connect();
 

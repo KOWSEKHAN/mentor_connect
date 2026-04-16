@@ -29,7 +29,7 @@ export function getSocket() {
 }
 
 export function connectSocket() {
-  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
+  const token = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('token') : null;
   if (!token) return;
   const s = createSocket();
   if (s.connected) return;

@@ -4,6 +4,18 @@ import Course from '../models/Course.js';
 import Roadmap from '../models/Roadmap.js';
 import AIContent from '../models/AIContent.js';
 import Task from '../models/Task.js';
+import { generateStructuredContent } from '../services/phiService.js';
+import { metrics } from '../observability/metrics.js';
+import {
+  emitCourseEvent,
+  persistCourseEvent,
+  deliverAndSnapshot,
+} from '../socket/eventBuilder.js';
+import { sanitizeLearningContent } from '../utils/sanitizeContent.js';
+import { auditFromRequest } from '../utils/auditContext.js';
+import { withCourseLock } from '../services/courseResourceLock.js';
+import { computeCourseProgress } from '../services/courseProgressService.js';
+import { transactionsMandatory } from '../config/replicaSet.js';
 
 const LEVELS = ['beginner', 'intermediate', 'advanced', 'master'];
 
@@ -25,32 +37,36 @@ async function loadMembership(mentorshipId, userId) {
   return { ms, isMentor, isMentee };
 }
 
-async function syncCourseFromMentorship(ms, courseIdHint = null) {
+async function syncCourseFromMentorship(ms, courseIdHint = null, session = null) {
   const queryById = courseIdHint && mongoose.Types.ObjectId.isValid(courseIdHint)
     ? { _id: courseIdHint }
     : null;
-  let course = queryById ? await Course.findOne(queryById) : null;
+  const withSess = (q) => (session ? q.session(session) : q);
+  let course = queryById ? await withSess(Course.findOne(queryById)) : null;
   if (!course) {
-    course = await Course.findOne({ mentorshipId: ms._id });
+    course = await withSess(Course.findOne({ mentorshipId: ms._id }));
   }
   if (!course) {
-    course = await Course.findOne({
-      $and: [
-        { $or: [{ mentee: ms.menteeId }, { menteeId: ms.menteeId }] },
-        { $or: [{ mentor: ms.mentorId }, { mentorId: ms.mentorId }] },
-      ],
-    });
+    course = await withSess(
+      Course.findOne({
+        $and: [
+          { $or: [{ mentee: ms.menteeId }, { menteeId: ms.menteeId }] },
+          { $or: [{ mentor: ms.mentorId }, { mentorId: ms.mentorId }] },
+        ],
+      })
+    );
   }
   if (!course) return null;
 
-  course.progress = clampProgress(ms.progress);
+  const cp = await computeCourseProgress(course._id, session);
+  course.progress = clampProgress(cp?.overallProgress ?? ms.progress);
   if (course.progress >= 100) {
     course.status = 'completed';
     if (!course.completedAt) course.completedAt = new Date();
     course.certificateIssued = true;
   }
   course.updatedAt = new Date();
-  await course.save();
+  await course.save(session ? { session } : {});
   return course;
 }
 
@@ -86,6 +102,57 @@ ${focus}
 - Demonstrate understanding in discussion
 - Submit level tasks with working outcomes
 - Be ready to progress to next level`;
+}
+
+function safeParseJson(text) {
+  if (!text || typeof text !== 'string') return null;
+  try {
+    return JSON.parse(
+      text
+        .replace(/```json/gi, '')
+        .replace(/```/g, '')
+        .trim()
+    );
+  } catch {
+    return null;
+  }
+}
+
+function formatLevelContentFromJson(level, parsed, fallbackText) {
+  if (!parsed || typeof parsed !== 'object') return fallbackText;
+  const explanation = String(parsed.explanation || '').trim();
+  const examples = Array.isArray(parsed.examples) ? parsed.examples.filter(Boolean).map((v) => String(v)) : [];
+  const resources = Array.isArray(parsed.resources) ? parsed.resources.filter(Boolean).map((v) => String(v)) : [];
+  if (!explanation) return fallbackText;
+  const prettyLevel = level.charAt(0).toUpperCase() + level.slice(1);
+  return `# ${prettyLevel} Level Content
+
+## Explanation
+${explanation}
+
+## Examples
+${examples.length ? examples.map((item) => `- ${item}`).join('\n') : '- No examples provided.'}
+
+## Resources
+${resources.length ? resources.map((item) => `- ${item}`).join('\n') : '- No resources provided.'}`;
+}
+
+function toStructuredContentPayload(level, content) {
+  const text = String(content || '');
+  const explanationMatch = text.match(/## Explanation\s*([\s\S]*?)\n## /i);
+  const examplesMatch = text.match(/## Examples\s*([\s\S]*?)\n## /i);
+  const resourcesMatch = text.match(/## Resources\s*([\s\S]*)$/i);
+  const parseBullets = (block) =>
+    String(block || '')
+      .split('\n')
+      .map((line) => line.replace(/^\s*-\s*/, '').trim())
+      .filter(Boolean);
+  return {
+    level,
+    explanation: explanationMatch ? explanationMatch[1].trim() : text,
+    examples: parseBullets(examplesMatch?.[1] || ''),
+    resources: parseBullets(resourcesMatch?.[1] || ''),
+  };
 }
 
 export const getStructuredState = async (req, res) => {
@@ -144,6 +211,18 @@ export const getLevelContent = async (req, res) => {
     }
 
     const doc = await AIContent.findOne({ mentorshipId: ms._id, level }).lean();
+
+    if (doc && isMentee && doc.status !== 'published') {
+      return res.json({
+        ...getMentorshipPayload(ms),
+        level,
+        content: '',
+        contentId: null,
+        generatedBy: null,
+        updatedAt: null,
+      });
+    }
+
     return res.json({
       ...getMentorshipPayload(ms),
       level,
@@ -171,22 +250,86 @@ export const upsertLevelContent = async (req, res) => {
 
     const prompt = req.body.prompt || '';
     const contentInput = req.body.content;
-    const content = typeof contentInput === 'string' && contentInput.trim()
-      ? contentInput
-      : generateLevelTemplate(ms.domain, level, prompt);
+    const hasManualContent = typeof contentInput === 'string' && contentInput.trim();
+    let content = hasManualContent ? contentInput : '';
+    if (!hasManualContent) {
+      const fallbackContent = generateLevelTemplate(ms.domain, level, prompt);
+      try {
+        const raw = await generateStructuredContent({
+          type: 'level_content',
+          level,
+          domain: ms.domain || prompt || 'general',
+          role: 'mentor',
+        });
+        const parsed = safeParseJson(raw);
+        content = formatLevelContentFromJson(level, parsed, fallbackContent);
+      } catch (aiErr) {
+        console.error('AI level content generation failed:', aiErr);
+        metrics.recordAiCall({
+          latencyMs: 0,
+          usedFallback: true,
+          failed: true,
+          responseChars: 0,
+        });
+        content = fallbackContent;
+      }
+    }
+    content = sanitizeLearningContent(content);
 
-    const doc = await AIContent.findOneAndUpdate(
-      { mentorshipId: ms._id, level },
-      {
-        $set: {
-          mentorshipId: ms._id,
-          courseId: toObjectIdOrNull(req.body.courseId),
-          content,
-          generatedBy: req.user._id,
+    const eventCourseId = String(req.body.courseId || '').trim();
+    const audit = auditFromRequest(req);
+    let doc;
+
+    if (eventCourseId && mongoose.Types.ObjectId.isValid(eventCourseId)) {
+      await withCourseLock(eventCourseId, async () => {
+        const session = await mongoose.startSession();
+        try {
+          let emitted;
+          await session.withTransaction(async () => {
+            doc = await AIContent.findOneAndUpdate(
+              { mentorshipId: ms._id, level },
+              {
+                $set: {
+                  mentorshipId: ms._id,
+                  courseId: toObjectIdOrNull(req.body.courseId),
+                  content,
+                  generatedBy: req.user._id,
+                },
+              },
+              { new: true, upsert: true, session }
+            );
+            emitted = await persistCourseEvent(
+              'ai_content_generated',
+              eventCourseId,
+              {
+                courseId: eventCourseId,
+                level,
+                content: toStructuredContentPayload(level, doc.content),
+                updatedAt: doc.updatedAt,
+              },
+              audit,
+              session
+            );
+          });
+          await deliverAndSnapshot(emitted ? [emitted] : []);
+        } finally {
+          await session.endSession();
+        }
+      });
+    } else {
+      doc = await AIContent.findOneAndUpdate(
+        { mentorshipId: ms._id, level },
+        {
+          $set: {
+            mentorshipId: ms._id,
+            courseId: toObjectIdOrNull(req.body.courseId),
+            content,
+            generatedBy: req.user._id,
+          },
         },
-      },
-      { new: true, upsert: true }
-    );
+        { new: true, upsert: true }
+      );
+    }
 
     return res.json({
       message: 'Level content saved',
@@ -250,18 +393,73 @@ export const createLevelTask = async (req, res) => {
     const title = String(req.body.title || '').trim();
     if (!title) return res.status(400).json({ message: 'Task title is required' });
 
-    const count = await Task.countDocuments({ mentorshipId: ms._id, level });
-    const task = await Task.create({
-      mentorshipId: ms._id,
-      courseId: toObjectIdOrNull(req.body.courseId),
-      level,
-      title,
-      description: String(req.body.description || ''),
-      isCompleted: false,
-      completedBy: null,
-      order: count + 1,
-      createdBy: req.user._id,
-    });
+    const audit = auditFromRequest(req);
+    const eventCourseId = String(req.body.courseId || '').trim();
+    let task;
+
+    if (eventCourseId && mongoose.Types.ObjectId.isValid(eventCourseId)) {
+      await withCourseLock(eventCourseId, async () => {
+        const session = await mongoose.startSession();
+        try {
+          let emitted;
+          await session.withTransaction(async () => {
+            const count = await Task.countDocuments({ mentorshipId: ms._id, level }).session(session);
+            const [t] = await Task.create(
+              [
+                {
+                  mentorshipId: ms._id,
+                  courseId: toObjectIdOrNull(req.body.courseId),
+                  level,
+                  title,
+                  description: String(req.body.description || ''),
+                  isCompleted: false,
+                  completedBy: null,
+                  order: count + 1,
+                  createdBy: req.user._id,
+                },
+              ],
+              { session }
+            );
+            task = t;
+            emitted = await persistCourseEvent(
+              'task_created',
+              eventCourseId,
+              {
+                courseId: eventCourseId,
+                level,
+                task: {
+                  _id: task._id,
+                  title: task.title,
+                  description: task.description || '',
+                  isCompleted: task.isCompleted,
+                  completedBy: task.completedBy,
+                  level: task.level,
+                  order: task.order,
+                },
+              },
+              audit,
+              session
+            );
+          });
+          await deliverAndSnapshot(emitted ? [emitted] : []);
+        } finally {
+          await session.endSession();
+        }
+      });
+    } else {
+      const count = await Task.countDocuments({ mentorshipId: ms._id, level });
+      task = await Task.create({
+        mentorshipId: ms._id,
+        courseId: toObjectIdOrNull(req.body.courseId),
+        level,
+        title,
+        description: String(req.body.description || ''),
+        isCompleted: false,
+        completedBy: null,
+        order: count + 1,
+        createdBy: req.user._id,
+      });
+    }
 
     return res.status(201).json({
       message: 'Task created',
@@ -287,53 +485,196 @@ export const toggleTaskCompletion = async (req, res) => {
     if (!taskId || !mongoose.Types.ObjectId.isValid(taskId)) {
       return res.status(400).json({ message: 'Invalid task id' });
     }
-    const task = await Task.findById(taskId);
-    if (!task) return res.status(404).json({ message: 'Task not found' });
+    const taskPreview = await Task.findById(taskId);
+    if (!taskPreview) return res.status(404).json({ message: 'Task not found' });
 
-    const membership = await loadMembership(task.mentorshipId, req.user._id);
+    const membership = await loadMembership(taskPreview.mentorshipId, req.user._id);
     if (!membership) return res.status(403).json({ message: 'Not authorized' });
-    const { ms, isMentee } = membership;
+    const { ms: msPreview, isMentee } = membership;
     if (!isMentee) return res.status(403).json({ message: 'Mentee only' });
 
-    const currentLevel = ms.currentLevel || 'beginner';
-    if (task.level !== currentLevel) {
+    const currentLevel = msPreview.currentLevel || 'beginner';
+    if (taskPreview.level !== currentLevel) {
       return res.status(400).json({ message: 'Task does not belong to current level' });
     }
 
-    task.isCompleted = !task.isCompleted;
-    task.completedBy = task.isCompleted ? req.user._id : null;
-    await task.save();
+    const audit = auditFromRequest(req);
+    const lockId = String(taskPreview.courseId || taskPreview.mentorshipId);
+    let emittedEvents = [];
+    let responseMs = msPreview;
 
-    const levelTasks = await Task.find({ mentorshipId: ms._id, level: currentLevel });
-    const hasTasks = levelTasks.length > 0;
-    const allDone = hasTasks && levelTasks.every((t) => t.isCompleted);
-    if (allDone) {
-      const levels = Array.isArray(ms.levels) && ms.levels.length > 0 ? ms.levels : LEVELS;
-      const currentIndex = Math.max(0, levels.indexOf(currentLevel));
-      const nextIndex = Math.min(levels.length - 1, currentIndex + 1);
-      ms.progress = clampProgress((currentIndex + 1) * 25);
-      if (nextIndex > currentIndex) {
-        ms.currentLevel = levels[nextIndex];
-      } else {
-        ms.currentLevel = levels[levels.length - 1] || 'master';
-        ms.progress = 100;
-        ms.status = 'completed';
+    try {
+      await withCourseLock(lockId, async () => {
+        const session = await mongoose.startSession();
+        try {
+          await session.withTransaction(async () => {
+            const task = await Task.findById(taskId).session(session);
+            if (!task) throw new Error('Task not found');
+
+            task.isCompleted = !task.isCompleted;
+            task.completedBy = task.isCompleted ? req.user._id : null;
+            await task.save({ session });
+
+            const ms = await Mentorship.findById(task.mentorshipId).session(session);
+            if (!ms) throw new Error('Mentorship not found');
+
+            const levelTasks = await Task.find({ mentorshipId: ms._id, level: currentLevel }).session(session);
+            const hasTasks = levelTasks.length > 0;
+            const allDone = hasTasks && levelTasks.every((t) => t.isCompleted);
+
+            if (allDone) {
+              const levels = Array.isArray(ms.levels) && ms.levels.length > 0 ? ms.levels : LEVELS;
+              const currentIndex = Math.max(0, levels.indexOf(currentLevel));
+              const nextIndex = Math.min(levels.length - 1, currentIndex + 1);
+              ms.progress = clampProgress((currentIndex + 1) * 25);
+              if (nextIndex > currentIndex) {
+                ms.currentLevel = levels[nextIndex];
+              } else {
+                ms.currentLevel = levels[levels.length - 1] || 'master';
+                ms.progress = 100;
+                ms.status = 'completed';
+              }
+              await ms.save({ session });
+              await syncCourseFromMentorship(ms, task.courseId, session);
+            }
+
+            const levelCompleted = levelTasks.filter((t) => t.isCompleted).length;
+            const levelProgress = hasTasks ? clampProgress((levelCompleted / levelTasks.length) * 100) : 0;
+            const overallProgress = clampProgress(ms.progress);
+            const eventCourseId = String(task.courseId || '');
+            if (eventCourseId) {
+              const ev1 = await persistCourseEvent(
+                'task_completed',
+                eventCourseId,
+                {
+                  courseId: eventCourseId,
+                  taskId: String(task._id),
+                  updatedProgress: overallProgress,
+                  task: {
+                    _id: task._id,
+                    title: task.title,
+                    description: task.description || '',
+                    isCompleted: task.isCompleted,
+                    completedBy: task.completedBy,
+                    level: task.level,
+                    order: task.order ?? 0,
+                  },
+                },
+                audit,
+                session
+              );
+              const ev2 = await persistCourseEvent(
+                'progress_updated',
+                eventCourseId,
+                {
+                  courseId: eventCourseId,
+                  level: currentLevel,
+                  levelProgress,
+                  overallProgress,
+                  currentLevel: ms.currentLevel || currentLevel,
+                },
+                audit,
+                session
+              );
+              emittedEvents = [ev1, ev2];
+            }
+          });
+          await deliverAndSnapshot(emittedEvents);
+        } finally {
+          await session.endSession();
+        }
+      });
+    } catch (txnErr) {
+      if (transactionsMandatory()) {
+        console.error('toggleTaskCompletion transaction failed:', txnErr);
+        return res.status(503).json({ message: 'Consistency store unavailable. Retry.' });
       }
-      await ms.save();
-      await syncCourseFromMentorship(ms, task.courseId);
+      console.error('toggleTaskCompletion transaction failed, fallback:', txnErr);
+      const task = await Task.findById(taskId);
+      if (!task) return res.status(404).json({ message: 'Task not found' });
+      const ms = await Mentorship.findById(task.mentorshipId);
+      if (!ms) return res.status(404).json({ message: 'Mentorship not found' });
+
+      task.isCompleted = !task.isCompleted;
+      task.completedBy = task.isCompleted ? req.user._id : null;
+      await task.save();
+
+      const levelTasks = await Task.find({ mentorshipId: ms._id, level: currentLevel });
+      const hasTasks = levelTasks.length > 0;
+      const allDone = hasTasks && levelTasks.every((t) => t.isCompleted);
+      if (allDone) {
+        const levels = Array.isArray(ms.levels) && ms.levels.length > 0 ? ms.levels : LEVELS;
+        const currentIndex = Math.max(0, levels.indexOf(currentLevel));
+        const nextIndex = Math.min(levels.length - 1, currentIndex + 1);
+        ms.progress = clampProgress((currentIndex + 1) * 25);
+        if (nextIndex > currentIndex) {
+          ms.currentLevel = levels[nextIndex];
+        } else {
+          ms.currentLevel = levels[levels.length - 1] || 'master';
+          ms.progress = 100;
+          ms.status = 'completed';
+        }
+        await ms.save();
+        await syncCourseFromMentorship(ms, task.courseId);
+      }
+
+      const levelCompleted = levelTasks.filter((t) => t.isCompleted).length;
+      const levelProgress = hasTasks ? clampProgress((levelCompleted / levelTasks.length) * 100) : 0;
+      const overallProgress = clampProgress(ms.progress);
+      const eventCourseId = String(task.courseId || '');
+      if (eventCourseId) {
+        await emitCourseEvent(
+          'task_completed',
+          eventCourseId,
+          {
+            courseId: eventCourseId,
+            taskId: String(task._id),
+            updatedProgress: overallProgress,
+            task: {
+              _id: task._id,
+              title: task.title,
+              description: task.description || '',
+              isCompleted: task.isCompleted,
+              completedBy: task.completedBy,
+              level: task.level,
+              order: task.order ?? 0,
+            },
+          },
+          audit
+        );
+        await emitCourseEvent(
+          'progress_updated',
+          eventCourseId,
+          {
+            courseId: eventCourseId,
+            level: currentLevel,
+            levelProgress,
+            overallProgress,
+            currentLevel: ms.currentLevel || currentLevel,
+          },
+          audit
+        );
+      }
+      responseMs = ms;
     }
+
+    const taskOut = await Task.findById(taskId);
+    if (!taskOut) {
+      return res.status(500).json({ message: 'Task state lost' });
+    }
+    const msOut = await Mentorship.findById(taskOut.mentorshipId);
 
     return res.json({
       message: 'Task updated',
       task: {
-        _id: task._id,
-        title: task.title,
-        description: task.description || '',
-        isCompleted: task.isCompleted,
-        completedBy: task.completedBy,
-        level: task.level,
+        _id: taskOut._id,
+        title: taskOut.title,
+        description: taskOut.description || '',
+        isCompleted: taskOut.isCompleted,
+        completedBy: taskOut.completedBy,
+        level: taskOut.level,
       },
-      mentorship: getMentorshipPayload(ms),
+      mentorship: getMentorshipPayload(msOut || responseMs),
     });
   } catch (err) {
     console.error('toggleTaskCompletion failed:', err);

@@ -1,8 +1,16 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, memo } from 'react'
 import api from '../../../utils/api'
 import { showToast } from '../../../components/Toast'
 
-export default function TasksView({ mentorshipId, level, userRole = 'mentee', courseId, onFlowUpdated }) {
+function TasksView({
+  mentorshipId,
+  level,
+  userRole = 'mentee',
+  courseId,
+  realtimeTaskCreatedEvent = null,
+  realtimeTaskCompletedEvent = null,
+  realtimeSnapshot = null,
+}) {
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -37,8 +45,6 @@ export default function TasksView({ mentorshipId, level, userRole = 'mentee', co
     try {
       await api.patch(`/api/structured/tasks/${task._id}/toggle`)
       showToast('Task updated!', 'success')
-      fetchTasks()
-      onFlowUpdated?.()
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to update task', 'error')
     }
@@ -49,23 +55,69 @@ export default function TasksView({ mentorshipId, level, userRole = 'mentee', co
     const taskText = prompt('Enter task name:')
     if (!taskText) return
     const description = prompt('Enter task description (optional):') || ''
+    const tempId = `temp-${Date.now()}`
+    const optimisticTask = {
+      _id: tempId,
+      title: taskText,
+      description,
+      isCompleted: false,
+      completedBy: null,
+      level: activeLevel,
+      order: (tasks[tasks.length - 1]?.order || tasks.length) + 1,
+      optimistic: true,
+    }
+    setTasks((prev) => [...prev, optimisticTask])
 
     setCreating(true)
     try {
-      await api.post(`/api/structured/${mentorshipId}/tasks`, {
+      const res = await api.post(`/api/structured/${mentorshipId}/tasks`, {
         level: activeLevel,
         title: taskText,
         description,
         courseId,
       })
+      const createdTask = res.data?.task
+      if (createdTask?._id) {
+        setTasks((prev) => prev.map((task) => (
+          task._id === tempId ? createdTask : task
+        )))
+      }
       showToast('Task added!', 'success')
-      fetchTasks()
     } catch (err) {
+      setTasks((prev) => prev.filter((task) => task._id !== tempId))
       showToast(err.response?.data?.message || 'Failed to add task', 'error')
     } finally {
       setCreating(false)
     }
   }
+
+  useEffect(() => {
+    if (!realtimeTaskCreatedEvent) return
+    if (String(realtimeTaskCreatedEvent.courseId || '') !== String(courseId || '')) return
+    if (String(realtimeTaskCreatedEvent.level || '').toLowerCase() !== activeLevel) return
+    const incoming = realtimeTaskCreatedEvent.task
+    if (!incoming?._id) return
+    setTasks((prev) => {
+      if (prev.some((task) => String(task._id) === String(incoming._id))) return prev
+      return [...prev, incoming].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    })
+  }, [realtimeTaskCreatedEvent, courseId, activeLevel])
+
+  useEffect(() => {
+    if (!realtimeTaskCompletedEvent) return
+    if (String(realtimeTaskCompletedEvent.courseId || '') !== String(courseId || '')) return
+    const incoming = realtimeTaskCompletedEvent.task
+    if (!incoming?._id) return
+    setTasks((prev) => prev.map((task) => (
+      String(task._id) === String(incoming._id) ? { ...task, ...incoming } : task
+    )))
+  }, [realtimeTaskCompletedEvent, courseId])
+
+  useEffect(() => {
+    if (!realtimeSnapshot?.tasks) return
+    const byLevel = realtimeSnapshot.tasks.filter((task) => String(task.level || '').toLowerCase() === activeLevel)
+    setTasks(byLevel)
+  }, [realtimeSnapshot, activeLevel])
 
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-xl shadow-lg p-6 h-full overflow-auto text-gray-300">
@@ -127,3 +179,4 @@ export default function TasksView({ mentorshipId, level, userRole = 'mentee', co
   )
 }
 
+export default memo(TasksView)

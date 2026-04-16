@@ -127,7 +127,9 @@ export const signup = async (req, res) => {
       console.error('Signup reward failed:', ptErr)
     }
 
-    const refreshed = await User.findById(user._id).select('points').lean()
+    const { getWallet } = await import('../services/walletService.js');
+    const wallet = await getWallet(user._id);
+
     const token = jwt.sign({ id: user._id, role: user.role }, getJwtSecret(), { expiresIn: '7d' })
     const userPayload = {
       id: user._id,
@@ -135,7 +137,8 @@ export const signup = async (req, res) => {
       name: user.name,
       email: user.email,
       role: user.role,
-      points: refreshed?.points ?? 0,
+      points: wallet.balance,
+      walletInfo: wallet,
     }
     res.status(201).json({ message: 'Signup successful', user: userPayload, token })
   } catch (err) {
@@ -155,6 +158,9 @@ export const login = async (req, res) => {
     const match = await bcrypt.compare(password, user.password)
     if (!match) return res.status(400).json({ message: 'Invalid credentials' })
 
+    const { getWallet } = await import('../services/walletService.js');
+    const wallet = await getWallet(user._id);
+
     const token = jwt.sign({ id: user._id, role: user.role }, getJwtSecret(), { expiresIn: '7d' })
     const userPayload = {
       id: user._id,
@@ -162,7 +168,8 @@ export const login = async (req, res) => {
       name: user.name,
       email: user.email,
       role: user.role,
-      points: user.points != null ? user.points : 0,
+      points: wallet.balance,
+      walletInfo: wallet,
     }
     res.json({ message: 'Login successful', user: userPayload, token })
   } catch (err) {
@@ -179,13 +186,18 @@ export const getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select('-password').lean()
     if (!user) return res.status(401).json({ message: 'User not found' })
+
+    const { getWallet } = await import('../services/walletService.js');
+    const wallet = await getWallet(user._id);
+
     const userPayload = {
       id: user._id,
       _id: user._id,
       name: user.name,
       email: user.email,
       role: user.role,
-      points: user.points != null ? user.points : 0,
+      points: wallet.balance,
+      walletInfo: wallet,
     }
     res.json({ user: userPayload })
   } catch (err) {

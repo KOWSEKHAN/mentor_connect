@@ -8,7 +8,13 @@ const USER_KEY = 'user';
 const TOKEN_KEY = 'token';
 
 function getStoredToken() {
-  return localStorage.getItem(TOKEN_KEY);
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+    localStorage.removeItem('mc_user');
+    return sessionStorage.getItem(TOKEN_KEY);
+  }
+  return null;
 }
 
 export function AuthProvider({ children }) {
@@ -35,9 +41,9 @@ export function AuthProvider({ children }) {
         setUser(res.data.user);
       } catch (err) {
         // Force clean startup: never keep a token that fails backend validation.
-        localStorage.removeItem(TOKEN_KEY);
-        localStorage.removeItem(USER_KEY);
-        localStorage.removeItem('mc_user');
+        sessionStorage.removeItem(TOKEN_KEY);
+        sessionStorage.removeItem(USER_KEY);
+        sessionStorage.removeItem('role');
         // Keep auth state deterministic: no verified user => unauthenticated UI.
         setUser(null);
       } finally {
@@ -87,7 +93,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     if (!ready) return;
-    const tokenForSocket = typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null;
+    const tokenForSocket = typeof window !== 'undefined' ? sessionStorage.getItem(TOKEN_KEY) : null;
     if (user) {
       console.log('Token being used:', tokenForSocket ? `${tokenForSocket.slice(0, 16)}...` : null);
       connectSocket();
@@ -96,8 +102,11 @@ export function AuthProvider({ children }) {
   }, [user, ready]);
 
   const login = (userObj, token) => {
-    localStorage.setItem(TOKEN_KEY, token);
-    localStorage.setItem(USER_KEY, JSON.stringify(userObj));
+    sessionStorage.setItem(TOKEN_KEY, token);
+    sessionStorage.setItem(USER_KEY, JSON.stringify(userObj));
+    if (userObj?.role) {
+      sessionStorage.setItem('role', userObj.role);
+    }
     setUser(userObj);
   };
 
@@ -106,15 +115,14 @@ export function AuthProvider({ children }) {
       if (!prev) return prev;
       const patch = typeof next === 'function' ? next(prev) : next;
       const merged = { ...prev, ...(patch || {}) };
-      localStorage.setItem(USER_KEY, JSON.stringify(merged));
+      sessionStorage.setItem(USER_KEY, JSON.stringify(merged));
+      if (merged.role) sessionStorage.setItem('role', merged.role);
       return merged;
     });
   };
 
   const logout = () => {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
-    localStorage.removeItem('mc_user');
+    sessionStorage.clear();
     setUser(null);
   };
 

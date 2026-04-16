@@ -20,6 +20,9 @@ const router = express.Router();
 router.post('/request', protect, requireRole('mentee'), sendMentorRequest);
 router.get('/my/mentors', protect, requireRole('mentee'), menteeListMentors);
 
+import { menteePendingRequests } from '../controllers/mentorRequestController.js';
+router.get('/my/requests', protect, requireRole('mentee'), menteePendingRequests);
+
 // Mentor endpoints
 router.get('/requests', protect, requireRole('mentor'), listPendingRequests);
 router.post('/requests/:reqId/accept', protect, requireRole('mentor'), acceptRequest);

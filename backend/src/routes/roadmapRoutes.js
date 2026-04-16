@@ -10,7 +10,7 @@ import {
 
 const router = express.Router();
 
-router.post('/generate', protect, requireRole(['mentee', 'mentor']), generateRoadmap);
+router.post('/generate', protect, requireRole('mentor'), generateRoadmap);
 router.get('/:courseId', protect, getCourseRoadmap);
 router.put('/step/:stepId', protect, requireRole('mentor'), updateRoadmapStep);
 router.post('/regenerate/:courseId', protect, requireRole('mentor'), regenerateRoadmap);

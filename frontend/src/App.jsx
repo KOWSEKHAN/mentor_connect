@@ -4,6 +4,7 @@ import Home from "./pages/Home";
 import Auth from "./pages/Auth";
 import MentorDashboard from "./pages/mentor/MentorDashboard";
 import MentorWorkspace from "./pages/mentor/MentorWorkspace";
+import MentorRealtimeConsole from "./pages/mentor/MentorRealtimeConsole";
 import MentorProfile from "./pages/mentor/Profile";
 import MenteeDashboard from "./pages/mentee/MenteeDashboard";
 import MenteeProfile from "./pages/mentee/Profile";
@@ -18,19 +19,17 @@ function LoadingScreen() {
 }
 
 function ProtectedRoute({ children, role }) {
-  const { user, ready } = useAuth();
-  if (!ready) return <LoadingScreen />;
-  if (!user) return <Navigate to="/auth" replace />;
-  if (role && user.role !== role) return <Navigate to="/" replace />;
-  return children;
-}
+  const token = sessionStorage.getItem("token");
+  const currentRole = sessionStorage.getItem("role");
 
-function PublicRoute({ children }) {
-  const { user, ready } = useAuth();
-  if (!ready) return <LoadingScreen />;
-  if (user) {
-    return <Navigate to={user.role === 'mentor' ? '/mentor' : '/mentee'} replace />;
+  if (!token) {
+    return <Navigate to="/" replace />;
   }
+
+  if (role && currentRole !== role) {
+    return <Navigate to="/" replace />;
+  }
+
   return children;
 }
 
@@ -47,18 +46,6 @@ function PageTransition({ children }) {
   );
 }
 
-function RootRoute() {
-  const { user, ready } = useAuth();
-  const location = useLocation();
-  console.log('Route decision:', { user: user?._id || user?.id || null, ready, pathname: location.pathname });
-
-  if (!ready) return <LoadingScreen />;
-  if (user) {
-    return <Navigate to={user.role === 'mentor' ? '/mentor' : '/mentee'} replace />;
-  }
-  return <Home />;
-}
-
 function App() {
   return (
     <AuthProvider>
@@ -69,7 +56,7 @@ function App() {
               path="/"
               element={
                 <PageTransition>
-                  <RootRoute />
+                  <Home />
                 </PageTransition>
               }
             />
@@ -77,9 +64,7 @@ function App() {
               path="/auth"
               element={
                 <PageTransition>
-                  <PublicRoute>
-                    <Auth />
-                  </PublicRoute>
+                  <Auth />
                 </PageTransition>
               }
             />
@@ -99,6 +84,16 @@ function App() {
                 <PageTransition>
                   <ProtectedRoute role="mentor">
                     <MentorWorkspace />
+                  </ProtectedRoute>
+                </PageTransition>
+              }
+            />
+            <Route
+              path="/mentor/ops"
+              element={
+                <PageTransition>
+                  <ProtectedRoute role="mentor">
+                    <MentorRealtimeConsole />
                   </ProtectedRoute>
                 </PageTransition>
               }

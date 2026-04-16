@@ -8,6 +8,9 @@ import connectDB from './src/config/db.js'
 import Message from './src/models/Message.js'
 import User from './src/models/User.js'
 import Mentorship from './src/models/Mentorship.js'
+import Course from './src/models/Course.js'
+import { setRealtimeIO, mentorshipCourseRoom } from './src/socket/realtime.js'
+import { metrics } from './src/observability/metrics.js'
 
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173'
 const SECRET = process.env.JWT_SECRET
@@ -21,6 +24,7 @@ import aiRoutes from './src/routes/aiRoutes.js'
 import searchRoutes from './src/routes/searchRoutes.js'
 import profileRoutes from './src/routes/profileRoutes.js'
 import messageRoutes from './src/routes/messageRoutes.js'
+import chatRoutes from './src/routes/chatRoutes.js'
 import roadmapRoutes from './src/routes/roadmapRoutes.js'
 import roadmapRoutesV2 from './src/routes/roadmapRoutesV2.js'
 import communityRoutes from './src/routes/communityRoutes.js'
@@ -28,6 +32,10 @@ import reviewRoutes from './src/routes/reviewRoutes.js'
 import certificateRoutes from './src/routes/certificateRoutes.js'
 import pointRoutes from './src/routes/pointRoutes.js'
 import structuredLearningRoutes from './src/routes/structuredLearningRoutes.js'
+import realtimeRoutes from './src/routes/realtimeRoutes.js'
+import walletRoutes from './src/routes/walletRoutes.js'
+import paymentRoutes from './src/routes/paymentRoutes.js'
+import { startProgressIntegrityJob } from './src/jobs/progressIntegrityJob.js'
 
 const app = express()
 const httpServer = createServer(app)
@@ -43,6 +51,7 @@ const io = new Server(httpServer, {
   pingTimeout: 60000,
   pingInterval: 25000
 })
+setRealtimeIO(io)
 
 app.use(cors({
   origin: CLIENT_ORIGIN,
@@ -51,8 +60,6 @@ app.use(cors({
 app.use(express.json({ limit: '1mb' }))
 
 app.use('/uploads', express.static('uploads'))
-
-connectDB()
 
 app.use('/api/auth', authRoutes)
 app.use('/api/mentorship', mentorshipRoutes)
@@ -65,7 +72,8 @@ app.use('/api/mentee', menteeRoutes)
 app.use('/api/ai', aiRoutes)
 app.use('/api/search', searchRoutes)
 app.use('/api/profile', profileRoutes)
-app.use('/api/messages', messageRoutes)
+app.use('/api/messages', messageRoutes) // Keep existing for backwards compatibility
+app.use('/api/chat', chatRoutes)
 app.use('/api/roadmaps', roadmapRoutes)
 app.use('/api/roadmap', roadmapRoutesV2)
 app.use('/api/community', communityRoutes)
@@ -74,6 +82,9 @@ app.use('/api/review', reviewRoutes)
 app.use('/api/certificate', certificateRoutes)
 app.use('/api/points', pointRoutes)
 app.use('/api/structured', structuredLearningRoutes)
+app.use('/api/realtime', realtimeRoutes)
+app.use('/api/wallet', walletRoutes)
+app.use('/api/payment', paymentRoutes)
 
 app.get('/', (req, res) => res.send('MentorConnect Backend is running'))
 
@@ -86,6 +97,7 @@ const getRoomName = (mentorshipId) =>
     ? mentorshipId
     : `mentorship_${mentorshipId}`
 const getCommunityRoomName = (courseId) => `community_${courseId || 'global'}`
+const getMentorshipCourseRoomName = (courseId) => mentorshipCourseRoom(courseId)
 
 const isMentorshipMember = async (mentorshipId, userId) => {
   if (!mentorshipId || !userId) return false
@@ -95,6 +107,18 @@ const isMentorshipMember = async (mentorshipId, userId) => {
   if (!ms) return false
   const uid = String(userId)
   return uid === String(ms.mentorId) || uid === String(ms.menteeId)
+}
+
+const isCourseMember = async (courseId, userId) => {
+  if (!courseId || !userId) return false
+  const mongoose = (await import('mongoose')).default
+  if (!mongoose.Types.ObjectId.isValid(courseId)) return false
+  const course = await Course.findById(courseId).select('mentor mentorId mentee menteeId').lean()
+  if (!course) return false
+  const uid = String(userId)
+  const mentorId = String(course.mentor?._id || course.mentor || course.mentorId || '')
+  const menteeId = String(course.mentee?._id || course.mentee || course.menteeId || '')
+  return uid === mentorId || uid === menteeId
 }
 
 io.use((socket, next) => {
@@ -114,6 +138,10 @@ io.use((socket, next) => {
 })
 
 io.on('connection', (socket) => {
+  metrics.inc('active_socket_connections')
+  socket.on('mentorship_realtime_reconnect_ack', () => {
+    metrics.inc('reconnect_hints')
+  })
   const uid = socket.userId
   if (uid) {
     socket.join(`user_${uid}`)
@@ -154,6 +182,25 @@ io.on('connection', (socket) => {
     socket.emit('joined_chat', { mentorshipId: id, room: roomName })
   })
 
+  socket.on('join_course_room', async (payload = {}) => {
+    const { courseId } = payload
+    if (!courseId || !socket.userId) return
+    if (!(await isCourseMember(courseId, socket.userId))) {
+      socket.emit('error', { message: 'Not authorized for this course room' })
+      return
+    }
+    const roomName = getMentorshipCourseRoomName(courseId)
+    socket.join(roomName)
+    socket.emit('joined_course_room', { courseId, room: roomName })
+  })
+
+  socket.on('leave_course_room', (payload = {}) => {
+    const { courseId } = payload
+    if (!courseId) return
+    const roomName = getMentorshipCourseRoomName(courseId)
+    socket.leave(roomName)
+  })
+
   socket.on('leave_chat', (payload = {}) => {
     const { mentorshipId, chatId } = payload
     const id = mentorshipId || chatId
@@ -164,10 +211,14 @@ io.on('connection', (socket) => {
 
   socket.on('send_message', async (data) => {
     const payload = data || {}
-    const { mentorshipId, content } = payload
-    const mentId = mentorshipId
+    // If courseId is passed, prioritize it. Fallback to mentorshipId for backwards compat.
+    const courseId = payload.courseId
+    const cIdStr = courseId ? String(courseId) : null
+    const mentorshipId = payload.mentorshipId
+    const content = payload.content
+
     try {
-      if (!mentId || !content) {
+      if (!content || (!courseId && !mentorshipId)) {
         console.error('Message error')
         socket.emit('error', { message: 'Missing required fields' })
         return
@@ -177,24 +228,36 @@ io.on('connection', (socket) => {
         return
       }
 
-      const mongoose = (await import('mongoose')).default
-      if (!mongoose.Types.ObjectId.isValid(mentId)) {
-        socket.emit('error', { message: 'Invalid mentorshipId format' })
-        return
-      }
-
-      const mentorship = await Mentorship.findById(mentId).select('mentorId menteeId').lean()
-      if (!mentorship) {
-        socket.emit('error', { message: 'Mentorship not found' })
-        return
-      }
-
       const senderId = String(socket.userId)
-      const mentorIdStr = String(mentorship.mentorId)
-      const menteeIdStr = String(mentorship.menteeId)
+
+      let menteeIdStr, mentorIdStr, mentIdStr, validCourseId
+
+      if (courseId) {
+        const Course = (await import('./src/models/Course.js')).default
+        const course = await Course.findById(courseId).select('mentor mentee mentorshipId').lean()
+        if (!course) {
+          socket.emit('error', { message: 'Course not found' })
+          return
+        }
+        validCourseId = courseId
+        mentIdStr = course.mentorshipId?.toString?.() || course.mentorshipId || mentorshipId
+        mentorIdStr = course.mentor?.toString?.() || course.mentor || ''
+        menteeIdStr = course.mentee?.toString?.() || course.mentee || ''
+      } else if (mentorshipId) {
+        const Mentorship = (await import('./src/models/Mentorship.js')).default
+        const mentorship = await Mentorship.findById(mentorshipId).select('mentorId menteeId').lean()
+        if (!mentorship) {
+          socket.emit('error', { message: 'Mentorship not found' })
+          return
+        }
+        mentIdStr = mentorshipId
+        mentorIdStr = mentorship.mentorId?.toString?.() || mentorship.mentorId || ''
+        menteeIdStr = mentorship.menteeId?.toString?.() || mentorship.menteeId || ''
+      }
+
       const isMember = senderId === mentorIdStr || senderId === menteeIdStr
       if (!isMember) {
-        socket.emit('error', { message: 'Not authorized to send in this mentorship' })
+        socket.emit('error', { message: 'Not authorized to send in this course/mentorship' })
         return
       }
 
@@ -205,10 +268,13 @@ io.on('connection', (socket) => {
       const senderRole = senderId === mentorIdStr ? 'mentor' : 'mentee'
 
       const msg = await Message.create({
-        mentorshipId: mentId,
+        courseId: validCourseId,
+        mentorshipId: mentIdStr, // Keep existing for compat
         senderId,
+        receiverId: expectedReceiverId,
         senderRole,
         text: String(content).trim(),
+        message: String(content).trim(),
         status: 'sent',
         deliveredTo: [expectedReceiverId],
         readBy: []
@@ -216,20 +282,22 @@ io.on('connection', (socket) => {
 
       const formattedMessage = {
         _id: msg._id,
-        mentorshipId: msg.mentorshipId.toString(),
+        courseId: msg.courseId?.toString(),
+        mentorshipId: msg.mentorshipId?.toString(),
         senderId: msg.senderId.toString(),
+        receiverId: msg.receiverId?.toString(),
         senderRole: msg.senderRole,
         text: msg.text,
         status: msg.status,
         from: senderName,
-        message: msg.text,
-        timestamp: msg.createdAt,
+        message: msg.message || msg.text,
+        timestamp: msg.timestamp || msg.createdAt,
         createdAt: msg.createdAt,
         deliveredTo: msg.deliveredTo || [],
         readBy: msg.readBy || []
       }
 
-      const roomName = getRoomName(mentId)
+      const roomName = getRoomName(validCourseId || mentIdStr)
 
       io.to(roomName).emit('receive_message', formattedMessage)
     } catch (err) {
@@ -497,6 +565,7 @@ io.on('connection', (socket) => {
   })
 
   socket.on('disconnect', async () => {
+    metrics.inc('active_socket_connections', -1)
     socket.leaveAll()
     const uid = socket.userId
     if (uid) {
@@ -523,8 +592,47 @@ io.on('connection', (socket) => {
   })
 })
 
+if (process.env.CHAOS_MODE === 'true') {
+  setInterval(() => {
+    try {
+      const list = typeof io.sockets?.sockets?.values === 'function'
+        ? [...io.sockets.sockets.values()]
+        : []
+      if (!list.length) return
+      const victim = list[Math.floor(Math.random() * list.length)]
+      victim.disconnect(true)
+      metrics.inc('chaos_forced_disconnects')
+    } catch (_) {
+      /* ignore */
+    }
+  }, 45_000)
+  console.warn('[CHAOS_MODE] Random socket disconnects enabled (~45s interval, demo only)')
+}
+
 const PORT = process.env.PORT || 5000
-httpServer.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`)
-  console.log(`Socket.IO server ready`)
-})
+;(async () => {
+  await connectDB()
+  startProgressIntegrityJob()
+  
+  // 5. Start Wallet Reconciliation Job
+  const { startReconciliationJob } = await import('./src/jobs/reconcileWallet.js');
+  startReconciliationJob();
+
+  if (process.env.REDIS_URL) {
+    try {
+      const { createClient } = await import('redis')
+      const { createAdapter } = await import('@socket.io/redis-adapter')
+      const pubClient = createClient({ url: process.env.REDIS_URL })
+      const subClient = pubClient.duplicate()
+      await Promise.all([pubClient.connect(), subClient.connect()])
+      io.adapter(createAdapter(pubClient, subClient))
+      console.log('Socket.IO Redis adapter enabled (multi-instance ready)')
+    } catch (e) {
+      console.error('Redis adapter failed (single-node mode):', e.message)
+    }
+  }
+  httpServer.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`)
+    console.log(`Socket.IO server ready`)
+  })
+})()

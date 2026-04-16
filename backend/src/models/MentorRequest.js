@@ -6,7 +6,8 @@ const mentorRequestSchema = new mongoose.Schema({
   mentor: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   domain: { type: String, default: '' },
   message: { type: String, default: '' },
-  status: { type: String, enum: ['pending', 'accepted', 'rejected'], default: 'pending' },
+  coursePrice: { type: Number, default: 0 },
+  status: { type: String, enum: ['pending', 'price_set', 'accepted', 'rejected'], default: 'pending' },
   createdAt: { type: Date, default: Date.now },
   respondedAt: { type: Date }
 });

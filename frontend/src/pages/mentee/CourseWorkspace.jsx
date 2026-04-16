@@ -12,6 +12,7 @@ import OverviewView from './workspace/OverviewView'
 import TasksView from './workspace/TasksView'
 import NotesView from './workspace/NotesView'
 import Certificate from './workspace/Certificate'
+import useMentorshipRealtime from '../../hooks/useMentorshipRealtime'
 
 export default function CourseWorkspace() {
   const { courseId } = useParams()
@@ -22,6 +23,7 @@ export default function CourseWorkspace() {
   const [loading, setLoading] = useState(true)
   const [selectedStep, setSelectedStep] = useState(null)
   const fetchSeq = useRef(0)
+  const realtime = useMentorshipRealtime(courseId)
 
   useEffect(() => {
     fetchCourse()
@@ -64,6 +66,30 @@ export default function CourseWorkspace() {
   const refreshCourse = () => {
     fetchCourse()
   }
+
+  useEffect(() => {
+    if (!realtime?.progressUpdated) return
+    if (String(realtime.progressUpdated.courseId || '') !== String(courseId || '')) return
+    setCourse((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        progress: Number(realtime.progressUpdated.overallProgress ?? prev.progress ?? 0),
+      }
+    })
+  }, [realtime?.progressUpdated, courseId])
+
+  useEffect(() => {
+    if (!realtime?.levelUpdated) return
+    if (String(realtime.levelUpdated.courseId || '') !== String(courseId || '')) return
+    setCourse((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        currentLevel: realtime.levelUpdated.currentLevel,
+      }
+    })
+  }, [realtime?.levelUpdated, courseId])
 
   if (loading) {
     return (
@@ -141,6 +167,9 @@ export default function CourseWorkspace() {
                       mentorshipId={course?.mentorshipId}
                       level={course?.currentLevel || selectedStep?.level || 'beginner'}
                       userRole="mentee"
+                      courseId={courseId}
+                      realtimeContentEvent={realtime?.aiContentPublished}
+                      realtimeSnapshot={realtime?.snapshot}
                     />
                   )}
                   {activeTab === 'roadmap' && (
@@ -151,6 +180,7 @@ export default function CourseWorkspace() {
                           userRole="mentee"
                           course={course}
                           onStepSelect={setSelectedStep}
+                          realtimeRoadmapEvent={realtime?.roadmapCreated}
                         />
                         <StepDetailsPanel step={selectedStep} courseId={courseId} />
                       </div>
@@ -162,7 +192,9 @@ export default function CourseWorkspace() {
                       level={course?.currentLevel || 'beginner'}
                       userRole="mentee"
                       courseId={courseId}
-                      onFlowUpdated={refreshCourse}
+                      realtimeTaskCreatedEvent={realtime?.taskCreated}
+                      realtimeTaskCompletedEvent={realtime?.taskCompleted}
+                      realtimeSnapshot={realtime?.snapshot}
                     />
                   )}
                   {activeTab === 'notes' && (

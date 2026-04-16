@@ -1,4 +1,4 @@
-export default function Sidebar({ activeTab, setActiveTab }) {
+export default function Sidebar({ activeTab, setActiveTab, chatLabel = 'Chat with Mentor' }) {
   const tabs = [
     { id: 'overview', label: 'Overview' },
     { id: 'ai-content', label: 'AI Content' },
@@ -6,7 +6,7 @@ export default function Sidebar({ activeTab, setActiveTab }) {
     { id: 'tasks', label: 'Tasks' },
     { id: 'notes', label: 'Notes' },
     { id: 'certificate', label: 'Certificate' },
-    { id: 'chat', label: 'Chat with Mentor' }
+    { id: 'chat', label: chatLabel }
   ]
 
   return (

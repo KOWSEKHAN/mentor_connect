@@ -1,5 +1,6 @@
 // src/pages/Auth.jsx
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
 import Footer from '../components/Footer';
 import { useAuth } from '../utils/auth';
@@ -16,6 +17,7 @@ export default function Auth() {
   const [error, setError] = useState('');
 
   const { login } = useAuth();
+  const navigate = useNavigate();
 
   async function submit(e) {
     e.preventDefault();
@@ -42,10 +44,12 @@ export default function Auth() {
         // response contains: { message, user, token }
         const { user, token } = res.data;
         login(user, token);
+        navigate(user.role === 'mentor' ? '/mentor' : '/mentee');
       } else {
         const res = await api.post('/api/auth/login', { email, password });
         const { user, token } = res.data;
         login(user, token);
+        navigate(user.role === 'mentor' ? '/mentor' : '/mentee');
       }
     } catch (err) {
       console.error(err);

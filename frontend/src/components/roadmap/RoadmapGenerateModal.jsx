@@ -10,7 +10,7 @@ export default function RoadmapGenerateModal({ courseId, menteeId, isOpen, onClo
     if (!courseId || !menteeId) return
     setLoading(true)
     try {
-      await api.post('/api/roadmap/generate-ai', {
+      const res = await api.post('/api/roadmap/generate-ai', {
         courseId,
         menteeId,
         domain: prompt.trim() || undefined,
@@ -18,7 +18,7 @@ export default function RoadmapGenerateModal({ courseId, menteeId, isOpen, onClo
       showToast('Roadmap generated successfully', 'success')
       setPrompt('')
       onClose?.()
-      onGenerated?.()
+      onGenerated?.(res.data)
     } catch (err) {
       const msg = err.response?.data?.message || 'Failed to generate roadmap'
       showToast(msg, 'error')

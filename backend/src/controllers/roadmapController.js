@@ -5,6 +5,8 @@ import Course from '../models/Course.js';
 import Mentorship from '../models/Mentorship.js';
 import { startSafeSession } from '../../utils/dbSession.js';
 import { generateRoadmapFromPhi } from '../services/phiService.js';
+import { emitCourseEvent } from '../socket/eventBuilder.js';
+import { auditFromRequest } from '../utils/auditContext.js';
 
 const LEVELS = ['beginner', 'intermediate', 'advanced', 'master'];
 
@@ -39,6 +41,22 @@ function formatRoadmapResponse(populated) {
   };
 }
 
+function emitRoadmapCreatedEvent(req, courseId, roadmap) {
+  if (!courseId || !roadmap) return;
+  void emitCourseEvent(
+    'roadmap_created',
+    courseId,
+    {
+      courseId: String(courseId),
+      roadmap: {
+        ...roadmap,
+        generatedAt: new Date().toISOString(),
+      },
+    },
+    auditFromRequest(req)
+  );
+}
+
 /**
  * createRoadmap — transaction: deactivate previous, increment version, create roadmap + steps, link, commit.
  * Body: { courseId, menteeId, mentorId (optional), title, steps (optional array of { order, level, title, description?, subtopics? }) }
@@ -48,6 +66,9 @@ export const createRoadmap = async (req, res) => {
     const { courseId, menteeId, mentorId, title, steps: stepsInput } = req.body;
     const userId = req.user._id;
     const userRole = req.user.role;
+    if (userRole !== 'mentor') {
+      return res.status(403).json({ message: 'Mentor only' });
+    }
 
     if (!courseId || !menteeId) {
       return res.status(400).json({ message: 'courseId and menteeId are required' });
@@ -163,7 +184,9 @@ export const createRoadmap = async (req, res) => {
       await session.endSession();
     }
     const populated = await Roadmap.findById(roadmap._id).populate('steps').lean();
-    return res.status(201).json(formatRoadmapResponse(populated));
+    const response = formatRoadmapResponse(populated);
+    emitRoadmapCreatedEvent(req, courseId, response);
+    return res.status(201).json(response);
   } catch (err) {
     console.error('Roadmap creation failed:', err);
     return res.status(500).json({ message: 'Server error' });
@@ -312,7 +335,9 @@ export const updateRoadmap = async (req, res) => {
       await session.endSession();
     }
     const populated = await Roadmap.findById(roadmap._id).populate('steps').lean();
-    return res.json(formatRoadmapResponse(populated));
+    const response = formatRoadmapResponse(populated);
+    emitRoadmapCreatedEvent(req, existing.courseId, response);
+    return res.json(response);
   } catch (err) {
     if (session) {
       await session.abortTransaction().catch(() => {});
@@ -330,13 +355,23 @@ export const updateRoadmap = async (req, res) => {
 export const generateRoadmapAI = async (req, res) => {
   try {
     const { courseId, menteeId, mentorId, domain } = req.body;
+    const userId = req.user._id;
+    const userRole = req.user.role;
+
+    if (userRole !== 'mentor') {
+      return res.status(403).json({ message: 'Mentor only' });
+    }
 
     if (!courseId || !menteeId) return res.status(400).json({ message: 'courseId and menteeId are required' });
 
     const course = await Course.findById(courseId).select('mentee mentor title domain mentorshipId').lean();
     if (!course) return res.status(404).json({ message: 'Course not found' });
     const courseMenteeId = (course.mentee?._id || course.mentee).toString();
+    const courseMentorId = course.mentor ? (course.mentor._id || course.mentor).toString() : null;
     if (courseMenteeId !== menteeId.toString()) return res.status(403).json({ message: 'menteeId does not match course' });
+    if (!courseMentorId || userId.toString() !== courseMentorId) {
+      return res.status(403).json({ message: 'Not authorized for this course' });
+    }
 
     const aiPayload = await generateRoadmapFromPhi({
       courseTitle: course.title || 'AI Learning Roadmap',
@@ -396,7 +431,9 @@ export const generateRoadmapAI = async (req, res) => {
     await roadmap.save();
 
     const populated = await Roadmap.findById(roadmap._id).populate('steps').lean();
-    return res.status(201).json(formatRoadmapResponse(populated));
+    const response = formatRoadmapResponse(populated);
+    emitRoadmapCreatedEvent(req, courseId, response);
+    return res.status(201).json(response);
   } catch (err) {
     console.error('Roadmap AI failed');
     return res.status(500).json({ message: 'Server error' });
@@ -423,10 +460,10 @@ export const generateRoadmap = async (req, res) => {
     const menteeId = course.mentee?._id || course.mentee;
     const mentorId = course.mentor?._id || course.mentor || null;
 
-    if (userRole === 'mentee' && menteeId.toString() !== userId.toString()) {
-      return res.status(403).json({ message: 'Not authorized for this course' });
+    if (userRole !== 'mentor') {
+      return res.status(403).json({ message: 'Mentor only' });
     }
-    if (userRole === 'mentor' && (!mentorId || mentorId.toString() !== userId.toString())) {
+    if (!mentorId || mentorId.toString() !== userId.toString()) {
       return res.status(403).json({ message: 'Not authorized for this course' });
     }
 
@@ -480,7 +517,7 @@ export const generateRoadmap = async (req, res) => {
 
     const steps = (populated.steps || []).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
-    return res.status(201).json({
+    const response = {
       roadmapId: populated._id,
       title: populated.title,
       version: populated.version,
@@ -495,7 +532,9 @@ export const generateRoadmap = async (req, res) => {
         progress: s.progress ?? 0,
         aiContentGenerated: s.aiContentGenerated ?? false,
       })),
-    });
+    };
+    emitRoadmapCreatedEvent(req, courseId, response);
+    return res.status(201).json(response);
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Server error' });
@@ -636,7 +675,7 @@ export const regenerateRoadmap = async (req, res) => {
       .lean();
     const steps = (populated.steps || []).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
-    return res.status(201).json({
+    const response = {
       roadmapId: populated._id,
       title: populated.title,
       version: populated.version,
@@ -651,7 +690,9 @@ export const regenerateRoadmap = async (req, res) => {
         progress: s.progress ?? 0,
         aiContentGenerated: s.aiContentGenerated ?? false,
       })),
-    });
+    };
+    emitRoadmapCreatedEvent(req, courseId, response);
+    return res.status(201).json(response);
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Server error' });
@@ -725,7 +766,7 @@ export const activateRoadmapVersion = async (req, res) => {
     const updated = await Roadmap.findById(roadmapId).populate('steps').lean();
     const steps = (updated.steps || []).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
-    return res.json({
+    const response = {
       roadmapId: updated._id,
       title: updated.title,
       version: updated.version,
@@ -741,7 +782,9 @@ export const activateRoadmapVersion = async (req, res) => {
         progress: s.progress ?? 0,
         aiContentGenerated: s.aiContentGenerated ?? false,
       })),
-    });
+    };
+    emitRoadmapCreatedEvent(req, updated.courseId, response);
+    return res.json(response);
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Server error' });

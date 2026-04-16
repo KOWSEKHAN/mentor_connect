@@ -9,9 +9,9 @@ import {
 
 const router = express.Router();
 
-router.post('/create', protect, requireRole(['mentee', 'mentor']), createRoadmap);
+router.post('/create', protect, requireRole('mentor'), createRoadmap);
 router.get('/:courseId/:menteeId', protect, getActiveRoadmap);
 router.put('/update/:roadmapId', protect, requireRole('mentor'), updateRoadmap);
-router.post('/generate-ai', protect, requireRole(['mentee', 'mentor']), generateRoadmapAI);
+router.post('/generate-ai', protect, requireRole('mentor'), generateRoadmapAI);
 
 export default router;

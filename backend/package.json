@@ -6,22 +6,31 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js --ignore node_modules --ignore uploads --ignore logs --delay 200ms",
-    "migrate:mentorships": "node scripts/migrateMentorships.js"
+    "migrate:mentorships": "node scripts/migrateMentorships.js",
+    "archive:events": "node scripts/archiveRealtimeEvents.js",
+    "loadtest:realtime": "node scripts/loadTestRealtime.js"
   },
   "dependencies": {
+    "@socket.io/redis-adapter": "^8.3.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
+    "crypto": "^1.0.1",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
+    "express-rate-limit": "^7.4.1",
     "jsonwebtoken": "^9.0.2",
     "mammoth": "^1.6.0",
     "mongoose": "^7.5.0",
     "multer": "^1.4.5-lts.1",
     "pdf-parse": "^1.1.4",
+    "razorpay": "^2.9.6",
+    "redis": "^4.7.0",
     "socket.io": "^4.8.1",
-    "tesseract.js": "^5.1.0"
+    "tesseract.js": "^5.1.0",
+    "winston": "^3.11.0"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
+    "nodemon": "^3.0.2",
+    "socket.io-client": "^4.8.1"
   }
 }

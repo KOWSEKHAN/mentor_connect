@@ -8,10 +8,18 @@ const messageSchema = new mongoose.Schema(
       ref: 'Mentorship',
       required: true
     },
+    courseId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Course'
+    },
     senderId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: true
+    },
+    receiverId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
     },
     senderRole: {
       type: String,
@@ -23,6 +31,13 @@ const messageSchema = new mongoose.Schema(
       required: true,
       trim: true,
       maxlength: 5000
+    },
+    message: {
+      type: String,
+    },
+    timestamp: {
+      type: Date,
+      default: Date.now
     },
     status: {
       type: String,
@@ -39,6 +54,8 @@ const messageSchema = new mongoose.Schema(
 
 // Indexes for enterprise query performance
 messageSchema.index({ mentorshipId: 1 });
+messageSchema.index({ courseId: 1 });
+messageSchema.index({ timestamp: 1 });
 messageSchema.index({ mentorshipId: 1, createdAt: 1 });
 messageSchema.index({ createdAt: 1 });
 messageSchema.index({ senderId: 1 });

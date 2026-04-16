@@ -78,6 +78,34 @@ export const listPendingRequests = async (req, res) => {
 };
 
 /**
+ * Mentee lists their pending/price_set requests
+ */
+export const menteePendingRequests = async (req, res) => {
+  try {
+    const menteeId = req.user._id;
+    const requests = await Mentorship.find({ 
+      menteeId, 
+      status: { $in: ['pending', 'price_set'] } 
+    }).populate('mentorId', 'name email').sort({ startedAt: -1 });
+
+    const shaped = requests.map((ms) => ({
+      _id: ms._id,
+      mentee: ms.menteeId,
+      mentor: ms.mentorId,
+      domain: ms.domain,
+      message: ms.message,
+      status: ms.status,
+      coursePrice: ms.coursePrice,
+      createdAt: ms.startedAt,
+    }));
+    return res.json({ requests: shaped });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
+/**
  * Mentor accepts a request -> attach mentor to existing course + create Mentorship
  * params: reqId
  */
@@ -125,6 +153,114 @@ export const acceptRequest = async (req, res) => {
       await course.save();
     }
 
+    mentorship.status = 'accepted';
+    mentorship.startedAt = mentorship.startedAt || new Date();
+    if (!Array.isArray(mentorship.levels) || mentorship.levels.length === 0) {
+      mentorship.levels = ['beginner', 'intermediate', 'advanced', 'master'];
+    }
+    if (!mentorship.currentLevel) mentorship.currentLevel = 'beginner';
+    if (typeof mentorship.progress !== 'number') mentorship.progress = 0;
+    await mentorship.save();
+
+    return res.json({ success: true, mentorship, courseId: course?._id || null });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
+/**
+ * Mentor sets course price
+ */
+export const setCoursePrice = async (req, res) => {
+  try {
+    const mentorId = req.user._id;
+    const { reqId } = req.params;
+    const { price } = req.body;
+
+    if (!price || price <= 0) return res.status(400).json({ message: 'Price must be greater than zero' });
+
+    const mentorship = await Mentorship.findById(reqId);
+    if (!mentorship) return res.status(404).json({ message: 'Request not found' });
+    if (String(mentorship.mentorId) !== String(mentorId)) return res.status(403).json({ message: 'Unauthorized' });
+
+    mentorship.status = 'price_set';
+    mentorship.coursePrice = price;
+    await mentorship.save();
+
+    return res.json({ success: true, mentorship });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
+export const acceptAndPayRequest = async (req, res) => {
+  try {
+    const menteeId = req.user._id;
+    const { reqId } = req.params;
+
+    const mentorship = await Mentorship.findById(reqId);
+    if (!mentorship) return res.status(404).json({ message: 'Request not found' });
+    if (String(mentorship.menteeId) !== String(menteeId)) return res.status(403).json({ message: 'Unauthorized' });
+    if (mentorship.status !== 'price_set') return res.status(400).json({ message: 'Request not ready for payment' });
+
+    // Idempotency: Protect against Double Click payments
+    const Transaction = (await import('../models/Transaction.js')).default;
+    const existing = await Transaction.findOne({
+      userId: menteeId,
+      referenceId: String(mentorship._id),
+      reason: 'course_purchase',
+      status: 'completed'
+    });
+
+    if (existing) {
+      return res.status(400).json({ message: 'Already paid' });
+    }
+
+    const { processTransfer } = await import('../services/walletService.js');
+    try {
+      // Execute the audited transfer with integer conversions inside
+      await processTransfer(
+        menteeId, 
+        mentorship.mentorId, 
+        mentorship.coursePrice, 
+        'course_purchase', 
+        String(mentorship._id),
+        menteeId,           // actorId
+        'mentee'            // actorRole
+      );
+    } catch (err) {
+      if (err.message === 'INSUFFICIENT_FUNDS') return res.status(400).json({ message: 'Insufficient points' });
+      throw err;
+    }
+
+    // Now link to course and activate mentorship
+    const normalizedDomain = mentorship.domain || '';
+    const course = await Course.findOne({
+      $or: [{ mentee: mentorship.menteeId }, { menteeId: mentorship.menteeId }],
+      domain: normalizedDomain,
+      $and: [
+        {
+          $or: [
+            { mentor: mentorship.mentorId },
+            { mentorId: mentorship.mentorId },
+            { mentor: null },
+            { mentor: { $exists: false } },
+          ],
+        },
+      ],
+    }).sort({ updatedAt: -1 });
+
+    if (course) {
+      course.mentor = mentorship.mentorId;
+      course.mentorId = mentorship.mentorId;
+      course.menteeId = mentorship.menteeId;
+      await course.save();
+    }
+
+    // Status lock: Mentorship requests become "accepted" to signal the payment is Complete 
+    // AND the course is now Active. (Using 'completed' marks the whole learning journey finished).
     mentorship.status = 'accepted';
     mentorship.startedAt = mentorship.startedAt || new Date();
     if (!Array.isArray(mentorship.levels) || mentorship.levels.length === 0) {

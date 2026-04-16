@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, memo } from 'react'
 import api from '../../utils/api'
 import StepCard from './StepCard'
 import RoadmapGenerateModal from './RoadmapGenerateModal'
 import { showToast } from '../Toast'
 
-export default function RoadmapView({ courseId, userRole, onStepSelect, course = null }) {
+function RoadmapView({ courseId, userRole, onStepSelect, course = null, realtimeRoadmapEvent = null }) {
   const [roadmap, setRoadmap] = useState(null)
   const [steps, setSteps] = useState([])
   const [currentLevel, setCurrentLevel] = useState('beginner')
@@ -19,6 +19,36 @@ export default function RoadmapView({ courseId, userRole, onStepSelect, course =
 
   const menteeId = course?.mentee?._id || course?.mentee || roadmap?.menteeId
 
+  const applyRoadmapData = useCallback((data) => {
+    if (!data?.roadmapId) {
+      setRoadmap(null)
+      setSteps([])
+      setSelectedStep(null)
+      onStepSelect?.(null)
+      return
+    }
+    const nextCurrentLevel = data.currentLevel || course?.currentLevel || 'beginner'
+    const nextLevels = Array.isArray(data.levels) && data.levels.length
+      ? data.levels
+      : (course?.levels || ['beginner', 'intermediate', 'advanced', 'master'])
+    setRoadmap({
+      roadmapId: data.roadmapId,
+      title: data.title,
+      version: data.version,
+      generatedBy: data.generatedBy,
+    })
+    setSteps(data.steps || [])
+    setCurrentLevel(nextCurrentLevel)
+    setLevels(nextLevels)
+    setProgress(Number(data.progress ?? course?.progress ?? 0))
+    setTitle(data.title || '')
+    if (data.steps?.length) {
+      const preferred = data.steps.find((s) => s.level === nextCurrentLevel) || data.steps[0]
+      setSelectedStep(preferred)
+      onStepSelect?.(preferred)
+    }
+  }, [course?.currentLevel, course?.levels, course?.progress, onStepSelect])
+
   const fetchRoadmap = useCallback(async () => {
     if (!courseId) return
     setLoading(true)
@@ -27,26 +57,7 @@ export default function RoadmapView({ courseId, userRole, onStepSelect, course =
       const res = await api.get(`/api/roadmaps/${courseId}`)
       const data = res.data
       if (data.roadmapId) {
-        const nextCurrentLevel = data.currentLevel || course?.currentLevel || 'beginner'
-        const nextLevels = Array.isArray(data.levels) && data.levels.length
-          ? data.levels
-          : (course?.levels || ['beginner', 'intermediate', 'advanced', 'master'])
-        setRoadmap({
-          roadmapId: data.roadmapId,
-          title: data.title,
-          version: data.version,
-          generatedBy: data.generatedBy,
-        })
-        setSteps(data.steps || [])
-        setCurrentLevel(nextCurrentLevel)
-        setLevels(nextLevels)
-        setProgress(Number(data.progress ?? course?.progress ?? 0))
-        setTitle(data.title || '')
-        if (data.steps?.length) {
-          const preferred = data.steps.find((s) => s.level === nextCurrentLevel) || data.steps[0]
-          setSelectedStep(preferred)
-          onStepSelect?.(preferred)
-        }
+        applyRoadmapData(data)
       } else {
         setRoadmap(null)
         setSteps([])
@@ -71,7 +82,7 @@ export default function RoadmapView({ courseId, userRole, onStepSelect, course =
     } finally {
       setLoading(false)
     }
-  }, [courseId, onStepSelect, course?.currentLevel, course?.levels, course?.progress])
+  }, [courseId, onStepSelect, course?.currentLevel, course?.levels, course?.progress, applyRoadmapData])
 
   useEffect(() => {
     fetchRoadmap()
@@ -80,6 +91,14 @@ export default function RoadmapView({ courseId, userRole, onStepSelect, course =
   useEffect(() => {
     if (roadmap?.title) setTitle(roadmap.title)
   }, [roadmap?.title])
+
+  useEffect(() => {
+    if (!realtimeRoadmapEvent?.roadmap || String(realtimeRoadmapEvent.courseId) !== String(courseId)) return
+    const data = realtimeRoadmapEvent.roadmap
+    applyRoadmapData(data)
+    setError('')
+    setLoading(false)
+  }, [realtimeRoadmapEvent, courseId, applyRoadmapData])
 
   const handleStepSelect = (step) => {
     setSelectedStep(step)
@@ -90,9 +109,9 @@ export default function RoadmapView({ courseId, userRole, onStepSelect, course =
     if (!courseId) return
     setRegenerating(true)
     try {
-      await api.post(`/api/roadmaps/regenerate/${courseId}`)
+      const res = await api.post(`/api/roadmaps/regenerate/${courseId}`)
+      applyRoadmapData(res.data)
       showToast('Roadmap regenerated', 'success')
-      fetchRoadmap()
     } catch (err) {
       const msg = err.response?.data?.message || 'Failed to regenerate roadmap'
       showToast(msg, 'error')
@@ -102,7 +121,7 @@ export default function RoadmapView({ courseId, userRole, onStepSelect, course =
   }
 
   const showRegenerate = userRole === 'mentor'
-  const canGenerate = !roadmap || roadmap.generatedBy !== 'mentor'
+  const canGenerate = userRole === 'mentor' && (!roadmap || roadmap.generatedBy !== 'mentor')
   const currentLevelIdx = Math.max(0, levels.indexOf(currentLevel))
   const safeSteps = Array.isArray(steps) ? steps : []
 
@@ -203,11 +222,13 @@ export default function RoadmapView({ courseId, userRole, onStepSelect, course =
         menteeId={menteeId}
         isOpen={generateModalOpen}
         onClose={() => setGenerateModalOpen(false)}
-        onGenerated={() => {
+        onGenerated={(payload) => {
           setGenerateModalOpen(false)
-          fetchRoadmap()
+          applyRoadmapData(payload)
         }}
       />
     </>
   )
 }
+
+export default memo(RoadmapView)

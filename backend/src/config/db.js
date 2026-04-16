@@ -1,4 +1,5 @@
 import mongoose from 'mongoose'
+import { assertTransactionsAvailable } from './replicaSet.js'
 
 const connectDB = async () => {
   try {
@@ -7,8 +8,9 @@ const connectDB = async () => {
       console.error('MONGO_URI not set in .env')
       return
     }
-    await mongoose.connect(uri, { })
+    await mongoose.connect(uri, {})
     console.log('MongoDB Connected ✔')
+    await assertTransactionsAvailable()
   } catch (err) {
     console.error('MongoDB connection error:', err.message)
     process.exit(1)

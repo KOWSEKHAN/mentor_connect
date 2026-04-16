@@ -30,6 +30,12 @@ const aiContentSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    status: {
+      type: String,
+      enum: ['draft', 'published'],
+      default: 'draft',
+      index: true,
+    },
   },
   { timestamps: true }
 );

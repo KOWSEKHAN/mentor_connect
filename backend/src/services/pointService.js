@@ -1,14 +1,21 @@
 import mongoose from 'mongoose';
-import User from '../models/User.js';
-import PointTransaction from '../models/PointTransaction.js';
+import { processCredit, processDebit, getWallet } from './walletService.js';
 import { randomBetween } from '../utils/randomBetween.js';
 
 export { randomBetween };
 
-/**
- * Idempotent credit: at most one row per (userId, type, referenceId).
- * referenceId must be a non-null string for deduplication.
- */
+// Map old type literals to new Transaction ENUM reasons
+const mapReason = (type) => {
+  const map = {
+    'signup': 'signup_bonus',
+    'course_completion': 'course_reward',
+    'task_completion': 'task_reward',
+    'mentor_reward': 'mentor_earning',
+    'spend': 'course_purchase',
+  };
+  return map[type] || 'recharge'; // Default fallback
+};
+
 export async function grantPointsOnce(userId, amount, type, referenceId, description) {
   if (!userId || amount == null || amount <= 0) {
     return { granted: false, reason: 'invalid_amount' };
@@ -17,163 +24,49 @@ export async function grantPointsOnce(userId, amount, type, referenceId, descrip
     return { granted: false, reason: 'reference_required' };
   }
 
-  const ref = String(referenceId);
-  const uid = userId.toString ? userId.toString() : String(userId);
-  const session = await mongoose.startSession();
+  // Deduplication check
+  const Transaction = (await import('../models/Transaction.js')).default;
+  const dup = await Transaction.findOne({ userId, reason: mapReason(type), referenceId });
+  if (dup) return { granted: false, duplicate: true };
 
   try {
-    let granted = false;
-    await session.withTransaction(async () => {
-      const dup = await PointTransaction.findOne({
-        userId: uid,
-        type,
-        referenceId: ref,
-      }).session(session);
-      if (dup) return;
-
-      const updated = await User.findOneAndUpdate(
-        { _id: uid },
-        { $inc: { points: amount } },
-        { new: true, session }
-      );
-      if (!updated) return;
-
-      await PointTransaction.create(
-        [
-          {
-            userId: uid,
-            points: amount,
-            type,
-            referenceId: ref,
-            description: description || '',
-          },
-        ],
-        { session }
-      );
-      granted = true;
-    });
-    return { granted };
+    await processCredit(userId, amount, mapReason(type), referenceId);
+    return { granted: true };
   } catch (err) {
-    if (err?.code === 11000) return { granted: false, duplicate: true };
-    throw err;
-  } finally {
-    session.endSession();
+    console.error('grantPointsOnce failed', err);
+    return { granted: false };
   }
 }
 
 export async function addPoints(userId, points, type, referenceId, description) {
-  if (!points || points <= 0) {
-    throw new Error('addPoints expects positive points');
-  }
-  const session = await mongoose.startSession();
-  try {
-    await session.withTransaction(async () => {
-      const updated = await User.findOneAndUpdate(
-        { _id: userId },
-        { $inc: { points } },
-        { new: true, session }
-      );
-      if (!updated) throw new Error('User not found');
-      await PointTransaction.create(
-        [
-          {
-            userId,
-            points,
-            type,
-            referenceId: referenceId != null ? String(referenceId) : null,
-            description: description || '',
-          },
-        ],
-        { session }
-      );
-    });
-  } finally {
-    session.endSession();
-  }
+  await processCredit(userId, points, mapReason(type), referenceId || 'manual');
 }
 
-/**
- * @param {string} referenceId — required for spend audit trail
- */
 export async function deductPointsSafe(userId, points, type, referenceId, description) {
-  const amt = Number(points);
-  if (!amt || amt <= 0) {
-    throw new Error('deductPointsSafe expects positive points amount');
-  }
-  if (referenceId == null || referenceId === '') {
-    throw new Error('deductPointsSafe requires referenceId');
-  }
-
-  const session = await mongoose.startSession();
-  try {
-    let newBalance = null;
-    await session.withTransaction(async () => {
-      const updated = await User.findOneAndUpdate(
-        { _id: userId, points: { $gte: amt } },
-        { $inc: { points: -amt } },
-        { new: true, session }
-      );
-      if (!updated) {
-        const err = new Error('INSUFFICIENT_POINTS');
-        err.code = 'INSUFFICIENT_POINTS';
-        throw err;
-      }
-      newBalance = updated.points;
-      await PointTransaction.create(
-        [
-          {
-            userId,
-            points: -amt,
-            type,
-            referenceId: String(referenceId),
-            description: description || '',
-          },
-        ],
-        { session }
-      );
-    });
-    return { balance: newBalance };
-  } finally {
-    session.endSession();
-  }
+  const res = await processDebit(userId, points, mapReason(type), referenceId);
+  return { balance: res.wallet.balance };
 }
 
-/** Spec alias: validates balance, writes negative transaction row. */
 export async function deductPoints(userId, points, type, referenceId, description) {
   return deductPointsSafe(userId, points, type, referenceId, description);
 }
 
-export async function awardCourseCompletion(menteeId, courseId) {
+export async function awardCourseCompletion(menteeId, courseId, mentorDefinedReward = 0) {
   const ref = `course:${courseId}`;
-  const amount = randomBetween(10, 15);
-  return grantPointsOnce(
-    menteeId,
-    amount,
-    'course_completion',
-    ref,
-    'Course completed'
-  );
+  const amount = Math.max(randomBetween(3, 5), Math.min(Number(mentorDefinedReward) || 0, 10));
+  return grantPointsOnce(menteeId, amount, 'course_completion', ref, 'Course completed');
 }
 
 export async function awardTaskCompletion(menteeId, mentorId, courseId, taskRef) {
   const base = `task:${courseId}:${taskRef}`;
-  const menteeRes = await grantPointsOnce(
-    menteeId,
-    randomBetween(1, 10),
-    'task_completion',
-    base,
-    'Task completed'
-  );
+  // Mentee reward 1 to 2.5
+  const menteeRes = await grantPointsOnce(menteeId, randomBetween(1, 2.5), 'task_completion', base, 'Task completed');
   let mentorRes = { granted: false };
+  
   if (mentorId) {
-    mentorRes = await grantPointsOnce(
-      mentorId,
-      randomBetween(2, 5),
-      'mentor_reward',
-      `${base}:mentor`,
-      'Mentor guidance reward'
-    );
+    mentorRes = await grantPointsOnce(mentorId, randomBetween(2, 5), 'mentor_reward', `${base}:mentor`, 'Mentor guidance reward');
   }
+  
   return { mentee: menteeRes, mentor: mentorRes };
 }
 

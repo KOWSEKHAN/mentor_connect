@@ -50,6 +50,9 @@ export const aiChat = async (req, res) => {
  */
 export const generateContent = async (req, res) => {
   try {
+    if (req.user?.role !== 'mentor') {
+      return res.status(403).json({ message: 'Mentor only' });
+    }
     const { courseId, domain, title, roadmapStepId, roadmapId } = req.body;
 
     if (!roadmapStepId) {
@@ -110,6 +113,136 @@ This content is AI-generated and can be customized based on your specific needs.
     return res.json({ content });
   } catch (err) {
     console.error(err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
+/**
+ * Generate AI content for specific level (Mentor controlled)
+ * POST /api/ai/generate-level-content
+ * body: { courseId, level, prompt }
+ */
+export const generateLevelContent = async (req, res) => {
+  try {
+    if (req.user?.role !== 'mentor') {
+      return res.status(403).json({ message: 'Mentor only' });
+    }
+    const { courseId, level, prompt } = req.body;
+
+    if (!courseId || !level) {
+      return res.status(400).json({ message: 'courseId and level are required' });
+    }
+
+    const contentObj = {
+      explanation: `(AI) Generated explanation for ${level}. Prompt used: ${prompt || 'None'}. Make sure to thoroughly study these materials to grasp the core concepts of the ${level} stage.`,
+      examples: [`Basic Example 1 for ${level}`, `Practical Example 2 for ${level}`],
+      resources: [`https://example.com/guide-${level}`, `https://example.com/docs`]
+    };
+
+    const AIContent = (await import('../models/AIContent.js')).default;
+    
+    // We stringify the content since the existing schema uses String for content, or save structure if possible.
+    // The prompt specified "content: { explanation, examples, resources }". 
+    // We'll store it stringified to respect schema but emit the object for real-time.
+    await AIContent.findOneAndUpdate(
+      { courseId, level },
+      { 
+        content: JSON.stringify(contentObj),
+        generatedBy: req.user._id,
+        courseId,
+        level,
+        status: 'draft'
+      },
+      { upsert: true, new: true }
+    );
+
+    const { emitCourseEvent } = await import('../socket/eventBuilder.js');
+    await emitCourseEvent('ai_content_generated', courseId, {
+      courseId,
+      level,
+      content: contentObj
+    });
+
+    return res.json({ content: contentObj });
+  } catch (err) {
+    console.error('generateLevelContent error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
+/**
+ * Publish AI content for specific level to the mentee
+ * POST /api/ai/publish-level-content
+ * body: { courseId, level }
+ */
+export const publishLevelContent = async (req, res) => {
+  try {
+    if (req.user?.role !== 'mentor') {
+      return res.status(403).json({ message: 'Mentor only' });
+    }
+    const { courseId, level } = req.body;
+
+    if (!courseId || !level) {
+      return res.status(400).json({ message: 'courseId and level are required' });
+    }
+
+    const AIContent = (await import('../models/AIContent.js')).default;
+    const content = await AIContent.findOne({ courseId, level });
+
+    if (!content) {
+      return res.status(404).json({ message: 'Draft content not found for this level' });
+    }
+
+    content.status = 'published';
+    await content.save();
+
+    let parsedContent;
+    try {
+      parsedContent = JSON.parse(content.content);
+    } catch {
+      parsedContent = { explanation: content.content, examples: [], resources: [] };
+    }
+
+    const { emitCourseEvent } = await import('../socket/eventBuilder.js');
+    await emitCourseEvent('ai_content_published', courseId, {
+      courseId,
+      level,
+      content: parsedContent,
+      updatedAt: content.updatedAt
+    });
+
+    return res.json({ message: 'Content published to mentee', status: 'published' });
+  } catch (err) {
+    console.error('publishLevelContent error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
+/**
+ * Get AI content for a course level
+ * GET /api/ai/content/:courseId?level=Intermediate
+ */
+export const getCourseLevelContent = async (req, res) => {
+  try {
+    const { courseId } = req.params;
+    const level = (req.query.level || 'beginner').toLowerCase();
+    
+    if (!courseId) {
+      return res.status(400).json({ message: 'courseId is required' });
+    }
+    
+    const isMentor = req.user?.role === 'mentor';
+    const query = { courseId, level };
+    if (!isMentor) {
+      query.status = 'published';
+    }
+
+    const AIContent = (await import('../models/AIContent.js')).default;
+    const content = await AIContent.findOne(query);
+
+    return res.json({ content: content ? content.content : '' });
+  } catch (err) {
+    console.error('getCourseLevelContent error:', err);
     return res.status(500).json({ message: 'Server error' });
   }
 };

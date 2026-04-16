@@ -11,6 +11,8 @@ const userSchema = new mongoose.Schema({
   interests: [{ type: String }], // mentee only - interests/skills
   expertise: [{ type: String }], // mentor only - expertise/skills
   profilePhoto: { type: String },
+  phone: { type: String, trim: true },
+  upiId: { type: String, trim: true },
   // Legacy fields for backward compatibility
   resumeURL: { type: String },
   extractedSkills: { type: [String], default: [] },

@@ -73,7 +73,7 @@ export default function MentorshipChat({ course, mentorshipId, userId, userName 
       setConnected(true);
       socket.emit('joinRoom', { mentorshipId });
     };
-    const token = localStorage.getItem('token');
+    const token = sessionStorage.getItem('token');
     socket.auth = { token: token || '' };
     if (!socket.connected && token) socket.connect();
     socket.on('connected', onConnected);
@@ -90,7 +90,7 @@ export default function MentorshipChat({ course, mentorshipId, userId, userName 
     readSentForRef.current = new Set();
     setLoading(true);
 
-    api.get(`/api/messages/${mentorshipId}`)
+    api.get(course?._id ? `/api/chat/${course._id}` : `/api/messages/${mentorshipId}`)
       .then((res) => setMessages(res.data?.messages || []))
       .catch(() => setMessages([]))
       .finally(() => setLoading(false));
@@ -164,6 +164,7 @@ export default function MentorshipChat({ course, mentorshipId, userId, userName 
     const messageText = input.trim();
     setInput('');
     socket.emit('send_message', {
+      courseId: course?._id,
       mentorshipId,
       content: messageText,
     });

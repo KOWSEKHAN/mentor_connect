@@ -1,15 +1,27 @@
 import { Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard, BookOpen, Users, MessageCircle, Sparkles, User } from 'lucide-react'
+import { LayoutDashboard, BookOpen, Users, MessageCircle, User, Activity } from 'lucide-react'
 
 const NAV_ITEMS = [
   { path: '/mentee', label: 'Dashboard', icon: LayoutDashboard, roles: ['mentee'] },
   { path: '/mentor', label: 'Dashboard', icon: LayoutDashboard, roles: ['mentor'] },
   { path: '/mentee', label: 'Courses', icon: BookOpen, roles: ['mentee'] },
   { path: '/mentor', label: 'Mentees', icon: Users, roles: ['mentor'] },
+  { path: '/mentor/ops', label: 'Realtime ops', icon: Activity, roles: ['mentor'] },
   { path: '/community', label: 'Community', icon: MessageCircle, roles: ['mentee', 'mentor'] },
   { path: '/mentee/profile', label: 'Profile', icon: User, roles: ['mentee'] },
   { path: '/mentor/profile', label: 'Profile', icon: User, roles: ['mentor'] },
 ]
+
+function navIsActive(pathname, item) {
+  if (item.path === '/mentor/ops') return pathname.startsWith('/mentor/ops')
+  if (item.path === '/mentor' && item.label === 'Dashboard') return pathname === '/mentor'
+  if (item.path === '/mentor' && item.label === 'Mentees') return pathname.startsWith('/mentor/workspace')
+  if (item.path === '/mentee' && item.label === 'Dashboard') return pathname === '/mentee'
+  if (item.path === '/mentee' && item.label === 'Courses') return pathname.startsWith('/mentee/course')
+  if (item.path === '/community') return pathname.startsWith('/community')
+  if (item.path?.endsWith('/profile')) return pathname === item.path
+  return pathname === item.path
+}
 
 export default function AppSidebar({ userRole }) {
   const location = useLocation()
@@ -29,10 +41,7 @@ export default function AppSidebar({ userRole }) {
       <nav className="p-2 flex-1">
         {uniq.map((item) => {
           const Icon = item.icon
-          const isActive =
-            location.pathname === item.path ||
-            (item.path === '/mentee' && location.pathname.startsWith('/mentee') && !location.pathname.includes('profile')) ||
-            (item.path === '/mentor' && location.pathname.startsWith('/mentor') && !location.pathname.includes('profile'))
+          const isActive = navIsActive(location.pathname, item)
           return (
             <Link
               key={item.path + item.label}
