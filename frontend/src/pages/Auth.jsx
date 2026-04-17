@@ -44,12 +44,14 @@ export default function Auth() {
         // response contains: { message, user, token }
         const { user, token } = res.data;
         login(user, token);
-        navigate(user.role === 'mentor' ? '/mentor' : '/mentee');
+        const dest = { admin: '/admin', mentor: '/mentor', mentee: '/mentee' };
+        navigate(dest[user.role] ?? '/mentee');
       } else {
         const res = await api.post('/api/auth/login', { email, password });
         const { user, token } = res.data;
         login(user, token);
-        navigate(user.role === 'mentor' ? '/mentor' : '/mentee');
+        const dest = { admin: '/admin', mentor: '/mentor', mentee: '/mentee' };
+        navigate(dest[user.role] ?? '/mentee');
       }
     } catch (err) {
       console.error(err);

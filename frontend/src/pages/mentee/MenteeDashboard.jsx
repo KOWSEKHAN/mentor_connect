@@ -11,6 +11,7 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../../utils/auth'
 import { useNavigate } from 'react-router-dom'
 import api from '../../utils/api'
+import { connectSocket, getSocket } from '../../socket'
 
 export default function MenteeDashboard(){
   const { user, updateUser } = useAuth()
@@ -48,7 +49,11 @@ export default function MenteeDashboard(){
   const [rechargeAmount, setRechargeAmount] = useState('')
   const [recharging, setRecharging] = useState(false)
 
-  // Fetch courses on mount
+  // Part 7: Dual wallet display state
+  const [walletPoints, setWalletPoints]   = useState(0)   // real money (INR-backed)
+  const [rewardPoints, setRewardPoints]   = useState(0)   // virtual (signup bonus)
+
+  // Fetch courses on mount + connect socket for realtime request updates
   useEffect(() => {
     fetchCourses()
     fetchRecommendations()
@@ -56,24 +61,78 @@ export default function MenteeDashboard(){
     fetchMyRequests()
   }, [])
 
+  // Part 5: realtime price_updated / request lifecycle events
+  useEffect(() => {
+    if (!user?._id) return
+    connectSocket()
+    const socket = getSocket()
+
+    const onPriceUpdated = (data) => {
+      // Update the matching request in-place so UI reflects price instantly
+      setMyRequests((prev) =>
+        prev.map((r) =>
+          String(r._id) === String(data.requestId)
+            ? { ...r, status: data.status, coursePrice: data.coursePrice }
+            : r
+        )
+      )
+      showToast(`Mentor set a price: ${data.coursePrice} pts`, 'info')
+    }
+
+    const onRequestAccepted = (data) => {
+      fetchMyRequests()   // Remove from pending list; course will appear in My Courses
+      fetchCourses()
+      showToast('Your request was accepted! Workspace is ready.', 'success')
+    }
+
+    const onRequestRejected = (data) => {
+      setMyRequests((prev) =>
+        prev.map((r) =>
+          String(r._id) === String(data.requestId)
+            ? { ...r, status: 'rejected' }
+            : r
+        )
+      )
+      showToast('Your mentorship request was rejected.', 'error')
+    }
+
+    socket.on('price_updated',      onPriceUpdated)
+    socket.on('request_accepted',   onRequestAccepted)
+    socket.on('request_rejected',   onRequestRejected)
+
+    return () => {
+      socket.off('price_updated',    onPriceUpdated)
+      socket.off('request_accepted', onRequestAccepted)
+      socket.off('request_rejected', onRequestRejected)
+    }
+  }, [user?._id])
+
   useEffect(() => {
     let cancelled = false
     api
       .get('/api/wallet/me')
       .then((res) => {
         if (cancelled) return
-        const bal = ((res.data?.wallet?.balance ?? 0) / 100).toFixed(2)
-        updateUser?.({ points: bal })
+        // Part 7: Read both balance fields from the new dual-wallet API response
+        const wp = res.data?.walletPoints ?? res.data?.wallet?.walletPoints ?? 0
+        const rp = res.data?.rewardPoints ?? res.data?.wallet?.rewardPoints ?? 0
+        setWalletPoints(wp)
+        setRewardPoints(rp)
+        // Legacy: keep `points` in auth context as walletPoints (real money)
+        updateUser?.({
+          points:       (wp / 100).toFixed(2),
+          walletPoints: wp,
+          rewardPoints: rp,
+        })
       })
       .catch(() => {})
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [])
 
   const fetchMyRequests = async () => {
     setLoadingRequests(true)
     try {
+      // Part 4: correct endpoint — /my/requests returns pending/price_set/rejected
       const res = await api.get('/api/mentorship/my/requests')
       setMyRequests(res.data.requests || [])
     } catch (err) {
@@ -372,10 +431,14 @@ export default function MenteeDashboard(){
               {courses.length ? Math.round(courses.reduce((a, c) => a + (c.progress || 0), 0) / courses.length) : 0}%
             </p>
           </div>
+          {/* Part 7: Wallet Balance — real money (INR-backed, rechargeable, payable) */}
           <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 shadow-xl hover:scale-[1.02] transition-all duration-200 flex flex-col justify-between">
             <div>
-              <p className="text-sm text-slate-400">Points balance</p>
-              <p className="text-3xl font-semibold text-amber-300 mt-1 tabular-nums">{user?.points ?? 0}</p>
+              <p className="text-sm text-slate-400">Wallet Balance</p>
+              <p className="text-3xl font-semibold text-emerald-300 mt-1 tabular-nums">
+                ₹{(walletPoints / 100).toFixed(2)}
+              </p>
+              <p className="text-xs text-slate-500 mt-1">Used for mentor payments & withdrawals</p>
             </div>
             <button
               onClick={() => setShowRechargeModal(true)}
@@ -383,6 +446,18 @@ export default function MenteeDashboard(){
             >
               + Recharge Wallet
             </button>
+          </div>
+
+          {/* Part 7: Reward Points — virtual (signup bonus, gamification, NOT withdrawable) */}
+          <div className="bg-white/5 backdrop-blur-xl border border-amber-500/10 rounded-xl p-6 shadow-xl hover:scale-[1.02] transition-all duration-200 flex flex-col justify-between">
+            <div>
+              <p className="text-sm text-slate-400">Reward Points</p>
+              <p className="text-3xl font-semibold text-amber-300 mt-1 tabular-nums">
+                {(rewardPoints / 100).toFixed(0)} pts
+              </p>
+              <p className="text-xs text-amber-600/80 mt-1">Virtual · Not withdrawable</p>
+            </div>
+            <p className="mt-4 text-xs text-slate-500">Earned via signup bonuses & milestones</p>
           </div>
         </section>
         
@@ -563,46 +638,71 @@ export default function MenteeDashboard(){
           </Card>
         </section>
 
-        {/* Section: My Pending Mentor Requests */}
-        {myRequests.length > 0 && (
+        {/* Section: My Mentor Requests — status-driven state machine */}
+        {(loadingRequests || myRequests.length > 0) && (
           <section className="mb-8">
-            <h3 className="font-semibold text-xl mb-4 text-white">Pending Mentor Requests</h3>
+            <h3 className="font-semibold text-xl mb-4 text-white">My Mentor Requests</h3>
+
+            {loadingRequests && myRequests.length === 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {[1, 2].map((i) => <Skeleton key={i} className="h-36" />)}
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {myRequests.map((req) => (
-                <Card key={req._id} className="text-slate-100 bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 shadow-xl">
-                  <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <h4 className="font-semibold text-lg text-white">
-                        {req.mentor?.name || 'Unknown Mentor'}
-                      </h4>
-                      <p className="text-sm text-slate-400">{req.domain || 'General domain'}</p>
-                    </div>
-                    {req.status === 'pending' ? (
-                      <span className="px-2 py-1 text-xs rounded-full bg-yellow-500/20 text-yellow-300 border border-yellow-500/30">
-                        Waiting for mentor
+              {myRequests.map((req) => {
+                const status = req.status
+
+                // Part 4: status badge config
+                const badge = {
+                  pending:   { label: 'Waiting for mentor', cls: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30' },
+                  price_set: { label: `Price: ${req.coursePrice} pts`, cls: 'bg-blue-500/20 text-blue-300 border-blue-500/30' },
+                  accepted:  { label: 'Accepted ✓', cls: 'bg-green-500/20 text-green-300 border-green-500/30' },
+                  rejected:  { label: 'Rejected', cls: 'bg-red-500/20 text-red-400 border-red-500/30' },
+                }[status] || { label: status, cls: 'bg-slate-500/20 text-slate-400 border-slate-500/30' }
+
+                return (
+                  <Card key={req._id} className="text-slate-100 bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 shadow-xl">
+                    <div className="flex justify-between items-start mb-3">
+                      <div>
+                        <h4 className="font-semibold text-lg text-white">
+                          {req.mentor?.name || 'Unknown Mentor'}
+                        </h4>
+                        <p className="text-sm text-slate-400">{req.domain || 'General domain'}</p>
+                      </div>
+                      <span className={`px-2 py-1 text-xs rounded-full border ${badge.cls}`}>
+                        {badge.label}
                       </span>
-                    ) : req.status === 'price_set' ? (
-                      <span className="px-2 py-1 text-xs rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                        Price set: {req.coursePrice} points
-                      </span>
-                    ) : null}
-                  </div>
-                  {req.message && (
-                    <p className="text-sm text-slate-300 mb-4 line-clamp-2">"{req.message}"</p>
-                  )}
-                  {req.status === 'price_set' && (
-                    <div className="mt-auto">
-                      <button
-                        onClick={() => handleAcceptAndPay(req._id)}
-                        disabled={actionLoading === req._id}
-                        className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition-colors text-sm disabled:opacity-50 font-medium"
-                      >
-                        {actionLoading === req._id ? 'Processing...' : `Accept & Pay (${req.coursePrice} pts)`}
-                      </button>
                     </div>
-                  )}
-                </Card>
-              ))}
+
+                    {req.message && (
+                      <p className="text-sm text-slate-300 mb-4 line-clamp-2">"{req.message}"</p>
+                    )}
+
+                    {/* Part 4: action CTA per status */}
+                    {status === 'price_set' && (
+                      <div className="mt-auto">
+                        <p className="text-xs text-slate-400 mb-2">
+                          Mentor is charging <span className="text-blue-300 font-semibold">{req.coursePrice} pts</span> for this course
+                        </p>
+                        <button
+                          onClick={() => handleAcceptAndPay(req._id)}
+                          disabled={actionLoading === req._id}
+                          className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition-colors text-sm disabled:opacity-50 font-medium"
+                        >
+                          {actionLoading === req._id ? 'Processing...' : `Accept & Pay (${req.coursePrice} pts)`}
+                        </button>
+                      </div>
+                    )}
+
+                    {status === 'rejected' && (
+                      <p className="text-sm text-red-400 mt-2">
+                        This request was declined by the mentor.
+                      </p>
+                    )}
+                  </Card>
+                )
+              })}
             </div>
           </section>
         )}

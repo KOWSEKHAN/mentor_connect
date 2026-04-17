@@ -18,7 +18,7 @@ const mentorshipSchema = new mongoose.Schema({
   },
   progress: { type: Number, default: 0 }, // 0-100
   coursePrice: { type: Number, default: 0 },
-  status: { type: String, enum: ['pending', 'price_set', 'accepted', 'completed'], default: 'pending' }
+  status: { type: String, enum: ['pending', 'price_set', 'accepted', 'completed', 'rejected'], default: 'pending' }
 });
 
 // Prevent duplicate mentorships for the same pair/domain.

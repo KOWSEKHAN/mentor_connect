@@ -7,7 +7,8 @@ import {
   acceptRequest,
   rejectRequest,
   setCoursePrice,
-  acceptAndPayRequest
+  acceptAndPayRequest,
+  menteePendingRequests,
 } from '../controllers/mentorRequestController.js';
 import { mentorListMentees } from '../controllers/mentorshipController.js';
 
@@ -21,6 +22,10 @@ const criticalLimit = rateLimit({
 
 // Mentee: send a request to a mentor
 router.post('/request', protect, requireRole('mentee'), sendMentorRequest);
+
+// Mentee: list their own requests (pending / price_set / rejected)
+// Part 4 frontend pull — also updated live via price_updated socket event
+router.get('/my/requests', protect, requireRole('mentee'), menteePendingRequests);
 
 // Mentor: list pending requests
 router.get('/requests', protect, requireRole('mentor'), listPendingRequests);

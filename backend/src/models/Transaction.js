@@ -18,7 +18,7 @@ const transactionSchema = new mongoose.Schema({
     required: true
   },
   referenceId: { type: String, default: null }, // taskId, courseId, requestId, paymentId
-  status: { type: String, enum: ['pending', 'approved', 'paid', 'completed', 'failed'], default: 'completed' },
+  status: { type: String, enum: ['pending', 'approved', 'processing', 'paid', 'completed', 'failed'], default: 'completed' },
   actorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   actorRole: { type: String, enum: ['mentor', 'mentee', 'admin', 'system'] },
   payoutRef: { type: String, default: null }

@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard, BookOpen, Users, MessageCircle, User, Activity } from 'lucide-react'
+import { LayoutDashboard, BookOpen, Users, MessageCircle, User, Activity, Wallet } from 'lucide-react'
 
 const NAV_ITEMS = [
   { path: '/mentee', label: 'Dashboard', icon: LayoutDashboard, roles: ['mentee'] },
@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { path: '/community', label: 'Community', icon: MessageCircle, roles: ['mentee', 'mentor'] },
   { path: '/mentee/profile', label: 'Profile', icon: User, roles: ['mentee'] },
   { path: '/mentor/profile', label: 'Profile', icon: User, roles: ['mentor'] },
+  { path: '/mentor/wallet',  label: 'Wallet',  icon: Wallet, roles: ['mentor'] },
 ]
 
 function navIsActive(pathname, item) {

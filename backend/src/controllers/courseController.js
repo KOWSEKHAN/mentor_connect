@@ -261,11 +261,13 @@ export const assignMentorToCourse = async (req, res) => {
     });
 
     if (!existingMentorship) {
+      // Part 4: NEVER auto-accept — create pending so mentor must go through state machine
       const createdMentorship = await Mentorship.create({
         mentorId,
         menteeId,
         domain: course.domain || '',
-        status: 'accepted',
+        status: 'pending',          // ← was 'accepted' — this was the root cause of auto-acceptance
+        coursePrice: 0,
         startedAt: new Date(),
       });
       course.mentorshipId = createdMentorship._id;
@@ -400,11 +402,12 @@ export const startCourse = async (req, res) => {
       return res.status(400).json({ message: 'Course name is required' });
     }
 
-    // Determine course title and domain
-    const courseTitle = course.name;
+    const courseTitle  = course.name;
     const courseDomain = course.type === 'domain' ? course.name : (course.domain || 'General');
 
-    // If mentor is selected, create/update pending mentorship (single source of truth)
+    // ── PATH A: Mentor selected ───────────────────────────────────────────────
+    // STRICT: NEVER create a Course here — workspace is gated behind acceptance.
+    // Only create a pending Mentorship; mentor must accept through the state machine.
     if (mentor && mentor._id) {
       const mentorUser = await User.findById(mentor._id);
       if (!mentorUser || mentorUser.role !== 'mentor') {
@@ -415,35 +418,42 @@ export const startCourse = async (req, res) => {
         { mentorId: mentor._id, menteeId, domain: courseDomain || '' },
         {
           $setOnInsert: {
-            mentorId: mentor._id,
+            mentorId:    mentor._id,
             menteeId,
-            domain: courseDomain || '',
-            startedAt: new Date(),
+            domain:      courseDomain || '',
+            coursePrice: 0,
+            startedAt:   new Date(),
           },
           $set: {
-            status: 'pending',
+            status:  'pending',
             message: `I would like to learn ${courseDomain}`,
           },
         },
         { upsert: true, new: true }
       );
-      var createdMentorshipId = ms?._id || null;
+
+      // No Course created — workspace will be created by ensureWorkspace() on acceptance
+      return res.status(201).json({
+        message:    'Mentorship request sent! Waiting for mentor to accept.',
+        mentorship: ms,
+        course:     null,
+      });
     }
 
-    // Create course (mentor is optional now)
+    // ── PATH B: Independent learning (no mentor) ──────────────────────────────
+    // No mentor gating — create workspace immediately
     const newCourse = await Course.create({
-      title: courseTitle,
-      domain: courseDomain,
-      mentor: mentor?._id || null,
-      mentee: menteeId,
-      mentorshipId: createdMentorshipId || null,
-      mentorId: mentor?._id || null,
-      menteeId
+      title:    courseTitle,
+      domain:   courseDomain,
+      mentor:   null,
+      mentorId: null,
+      mentee:   menteeId,
+      menteeId,
     });
 
     return res.status(201).json({
-      message: mentor ? 'Course started and mentorship request created!' : 'Course started in independent learning mode!',
-      course: newCourse
+      message: 'Course started in independent learning mode!',
+      course:  newCourse,
     });
   } catch (err) {
     console.error(err);

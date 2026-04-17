@@ -3,13 +3,25 @@ import Wallet from '../models/Wallet.js';
 import Transaction from '../models/Transaction.js';
 import User from '../models/User.js';
 
+// ─── internal wallet factory ─────────────────────────────────────────────────
 const ensureWallet = async (userId, session) => {
   let wallet = await Wallet.findOne({ userId }).session(session);
   if (!wallet) {
     const user = await User.findById(userId).session(session);
     if (!user) throw new Error(`User not found: ${userId}`);
-    // Backward comp: Start at 0, or legacy points (0 here as requested strictly)
-    wallet = await Wallet.create([{ userId, role: user.role, balance: 0, totalEarned: 0, totalSpent: 0 }], { session });
+    if (!['mentor', 'mentee'].includes(user.role)) {
+      throw new Error(`Wallet creation blocked: role '${user.role}' is not allowed`);
+    }
+    // Part 1+3: New wallets start with walletPoints:0, rewardPoints:0
+    wallet = await Wallet.create([{
+      userId,
+      role: user.role,
+      walletPoints: 0,   // real money — recharged via Razorpay
+      rewardPoints: 0,   // virtual — granted by signup/milestones
+      balance: 0,        // legacy mirror, kept for compat
+      totalEarned: 0,
+      totalSpent: 0,
+    }], { session });
     wallet = wallet[0];
   }
   return wallet;
@@ -28,74 +40,103 @@ export const getWallet = async (userId) => {
   return wallet;
 };
 
-export const processCreditSafe = async (userId, amount, reason, referenceId, session, actorId = null, actorRole = null, status = 'completed') => {
+// ─── Part 3 + 9: walletPoints ONLY for real-money credit (Razorpay recharge) ─
+export const processCreditSafe = async (
+  userId, amount, reason, referenceId, session, actorId = null, actorRole = null, status = 'completed'
+) => {
   if (amount <= 0) throw new Error('Credit amount must be positive');
-  
-  // Floating point fix: force integers
   const integerAmount = Math.round(Number(amount) * 100);
 
   await ensureWallet(userId, session);
 
+  // Part 3: Recharge credits walletPoints (real money), NOT rewardPoints
   const wallet = await Wallet.findOneAndUpdate(
     { userId },
-    { $inc: { balance: integerAmount, totalEarned: integerAmount } },
+    { $inc: { walletPoints: integerAmount, balance: integerAmount, totalEarned: integerAmount } },
     { new: true, session }
   );
 
   const transaction = await Transaction.create([{
-    userId,
-    type: 'credit',
-    amount: integerAmount,
-    reason,
-    referenceId,
-    status,
-    actorId,
-    actorRole,
+    userId, type: 'credit', amount: integerAmount, reason, referenceId, status, actorId, actorRole,
   }], { session });
 
   return { wallet, transaction: transaction[0] };
 };
 
-export const processDebitSafe = async (userId, amount, reason, referenceId, session, actorId = null, actorRole = null, status = 'completed') => {
+// ─── Part 5 + 9: walletPoints ONLY for debits (mentor payments) ──────────────
+export const processDebitSafe = async (
+  userId, amount, reason, referenceId, session, actorId = null, actorRole = null, status = 'completed'
+) => {
   if (amount <= 0) throw new Error('Debit amount must be positive');
-  
-  // Floating point fix: force integers
   const integerAmount = Math.round(Number(amount) * 100);
 
   const currentWallet = await ensureWallet(userId, session);
-  if (currentWallet.balance < integerAmount) {
+
+  // Part 5: ONLY walletPoints checked — rewardPoints cannot fund payments
+  if (currentWallet.walletPoints < integerAmount) {
     throw new Error('INSUFFICIENT_FUNDS');
   }
 
   const wallet = await Wallet.findOneAndUpdate(
-    { userId, balance: { $gte: integerAmount } },
-    { $inc: { balance: -integerAmount, totalSpent: integerAmount } },
+    { userId, walletPoints: { $gte: integerAmount } },
+    { $inc: { walletPoints: -integerAmount, balance: -integerAmount, totalSpent: integerAmount } },
     { new: true, session }
   );
 
   if (!wallet) throw new Error('INSUFFICIENT_FUNDS');
 
   const transaction = await Transaction.create([{
-    userId,
-    type: 'debit',
-    amount: integerAmount,
-    reason,
-    referenceId,
-    status,
-    actorId,
-    actorRole,
+    userId, type: 'debit', amount: integerAmount, reason, referenceId, status, actorId, actorRole,
   }], { session });
 
   return { wallet, transaction: transaction[0] };
 };
 
-// Atomic standalones
+// ─── Part 4: rewardPoints ONLY for virtual signup/milestone bonuses ───────────
+// NEVER callable for financial operations — completely isolated from payment flow
+export const creditRewardPointsSafe = async (
+  userId, points, reason, referenceId, session, actorId = null, actorRole = null
+) => {
+  if (points <= 0) throw new Error('Reward points must be positive');
+  const integerPoints = Math.round(Number(points));   // reward pts are not scaled (1 pt = 1 pt)
+
+  await ensureWallet(userId, session);
+
+  // Part 4: Credits ONLY rewardPoints — walletPoints untouched
+  const wallet = await Wallet.findOneAndUpdate(
+    { userId },
+    { $inc: { rewardPoints: integerPoints } },
+    { new: true, session }
+  );
+
+  // Log as a separate transaction type for auditability
+  const transaction = await Transaction.create([{
+    userId, type: 'credit', amount: integerPoints, reason, referenceId, status: 'completed', actorId, actorRole,
+  }], { session });
+
+  return { wallet, transaction: transaction[0] };
+};
+
+// ─── Atomic standalones ───────────────────────────────────────────────────────
 export const processCredit = async (userId, amount, reason, referenceId, actorId = null, actorRole = null) => {
   const session = await mongoose.startSession();
   try {
     let result;
     await session.withTransaction(async () => {
       result = await processCreditSafe(userId, amount, reason, referenceId, session, actorId, actorRole);
+    });
+    return result;
+  } finally {
+    session.endSession();
+  }
+};
+
+export const creditRewardPoints = async (userId, points, reason, referenceId, actorId = null, actorRole = null) => {
+  const session = await mongoose.startSession();
+  try {
+    let result;
+    await session.withTransaction(async () => {
+      result = await creditRewardPointsSafe(userId, points, reason, referenceId, session, actorId, actorRole);
     });
     return result;
   } finally {
@@ -116,6 +157,7 @@ export const processDebit = async (userId, amount, reason, referenceId, actorId 
   }
 };
 
+// ─── Part 5: Transfer uses ONLY walletPoints (real money) ────────────────────
 export const processTransfer = async (fromUserId, toUserId, amount, reason, referenceId, actorId = null, actorRole = null) => {
   const session = await mongoose.startSession();
   try {
@@ -124,47 +166,35 @@ export const processTransfer = async (fromUserId, toUserId, amount, reason, refe
       const integerAmount = Math.round(Number(amount) * 100);
 
       const wFrom = await ensureWallet(fromUserId, session);
-      if (wFrom.balance < integerAmount) {
+      // Part 5 + 9: ONLY walletPoints — rewardPoints must NEVER fund payments
+      if (wFrom.walletPoints < integerAmount) {
         throw new Error('INSUFFICIENT_FUNDS');
       }
       const wTo = await ensureWallet(toUserId, session);
 
-      // Wallet-level optimistic lock for Debit
+      // Optimistic lock debit from mentee walletPoints
       const walletFrom = await Wallet.findOneAndUpdate(
-        { userId: fromUserId, __v: wFrom.__v, balance: { $gte: integerAmount } },
-        { $inc: { balance: -integerAmount, totalSpent: integerAmount, __v: 1 } },
+        { userId: fromUserId, __v: wFrom.__v, walletPoints: { $gte: integerAmount } },
+        { $inc: { walletPoints: -integerAmount, balance: -integerAmount, totalSpent: integerAmount, __v: 1 } },
         { new: true, session }
       );
       if (!walletFrom) throw new Error('OPTIMISTIC_LOCK_FAILED_OR_INSUFFICIENT_FUNDS');
 
-      // Wallet-level optimistic lock for Credit
+      // Optimistic lock credit to mentor walletPoints
       const walletTo = await Wallet.findOneAndUpdate(
         { userId: toUserId, __v: wTo.__v },
-        { $inc: { balance: integerAmount, totalEarned: integerAmount, __v: 1 } },
+        { $inc: { walletPoints: integerAmount, balance: integerAmount, totalEarned: integerAmount, __v: 1 } },
         { new: true, session }
       );
       if (!walletTo) throw new Error('OPTIMISTIC_LOCK_FAILED_CREDIT');
 
       try {
-        // Exactly-once debit/credit pair matching within same block
         const txns = await Transaction.create([{
-          userId: fromUserId,
-          type: 'debit',
-          amount: integerAmount,
-          reason,
-          referenceId,
-          status: 'completed',
-          actorId,
-          actorRole
+          userId: fromUserId, type: 'debit', amount: integerAmount,
+          reason, referenceId, status: 'completed', actorId, actorRole,
         }, {
-          userId: toUserId,
-          type: 'credit',
-          amount: integerAmount,
-          reason: 'mentor_earning', // Credit reason explicitly split
-          referenceId,
-          status: 'completed',
-          actorId,
-          actorRole
+          userId: toUserId, type: 'credit', amount: integerAmount,
+          reason: 'mentor_earning', referenceId, status: 'completed', actorId, actorRole,
         }], { session });
 
         result = { debit: walletFrom, credit: walletTo, transactions: txns };
@@ -174,14 +204,12 @@ export const processTransfer = async (fromUserId, toUserId, amount, reason, refe
       }
     });
 
-    // Event emission after commit only 
+    // Post-commit event emission (best-effort)
     try {
       const { emitWalletUpdate } = await import('./eventService.js');
       emitWalletUpdate(fromUserId);
       emitWalletUpdate(toUserId);
-    } catch(err) {
-      // Optional event fail-safe
-    }
+    } catch (_) {}
 
     return result;
   } finally {

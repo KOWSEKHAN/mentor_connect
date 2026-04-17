@@ -1,20 +1,38 @@
-import { getWallet, processCreditSafe, processDebitSafe } from '../services/walletService.js';
+import { getWallet } from '../services/walletService.js';
 import Transaction from '../models/Transaction.js';
-import Wallet from '../models/Wallet.js';
-import User from '../models/User.js';
-import mongoose from 'mongoose';
-import razorpay from '../config/razorpay.js';
+import Wallet      from '../models/Wallet.js';
+import User        from '../models/User.js';
+import mongoose    from 'mongoose';
 
+// ─── shared role guard ────────────────────────────────────────────────────────
+const requireWalletRole = (req, res) => {
+  if (!['mentor', 'mentee'].includes(req.user?.role)) {
+    res.status(403).json({ error: 'Wallet not accessible for this role' });
+    return false;
+  }
+  return true;
+};
+
+// GET /api/wallet/me
 export const getMyWallet = async (req, res) => {
+  if (!requireWalletRole(req, res)) return;
   try {
     const wallet = await getWallet(req.user._id);
-    res.json({ wallet });
+    res.json({
+      wallet,
+      walletPoints: wallet?.walletPoints ?? 0,
+      rewardPoints: wallet?.rewardPoints ?? 0,
+      lockedPoints: wallet?.lockedPoints ?? 0,
+      balance:      wallet?.balance      ?? 0,
+    });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
 
+// GET /api/wallet/transactions
 export const getMyTransactions = async (req, res) => {
+  if (!requireWalletRole(req, res)) return;
   try {
     const transactions = await Transaction.find({ userId: req.user._id }).sort({ createdAt: -1 });
     res.json({ transactions });
@@ -23,7 +41,9 @@ export const getMyTransactions = async (req, res) => {
   }
 };
 
+// POST /api/wallet/recharge  (creates Razorpay order — webhook completes the credit)
 export const rechargeWallet = async (req, res) => {
+  if (!requireWalletRole(req, res)) return;
   const session = await mongoose.startSession();
   try {
     const { amount } = req.body;
@@ -31,123 +51,136 @@ export const rechargeWallet = async (req, res) => {
 
     let transaction;
     await session.withTransaction(async () => {
-      // 6. Recharge = Fake UI (Danger)
-      // Do NOT credit immediately. Just register a pending transaction.
-      const txPayload = [{
-        userId: req.user._id,
-        type: 'credit',
-        amount: Math.round(Number(amount) * 100), // Scale to int
-        reason: 'recharge',
+      const result = await Transaction.create([{
+        userId:      req.user._id,
+        type:        'credit',
+        amount:      Math.round(Number(amount) * 100),
+        reason:      'recharge',
         referenceId: `recharge:${Date.now()}`,
-        status: 'pending',
-        actorId: req.user._id,
-        actorRole: req.user.role
-      }];
-      const result = await Transaction.create(txPayload, { session });
+        status:      'pending',
+        actorId:     req.user._id,
+        actorRole:   req.user.role,
+      }], { session });
       transaction = result[0];
     });
 
     const currentWallet = await getWallet(req.user._id);
-    res.json({ message: 'Recharge queued for approval', balance: currentWallet.balance, transaction });
+    res.json({ message: 'Recharge queued', balance: currentWallet.balance, transaction });
   } catch (err) {
-    console.error(err);
+    console.error('[RECHARGE]', err);
     res.status(500).json({ message: 'Server error', error: err.message });
   } finally {
     session.endSession();
   }
 };
 
+/**
+ * POST /api/wallet/withdraw
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Step 1 of withdrawal flow: mentor requests a payout.
+ *
+ * What happens here:
+ *  1. Validate role, amount, UPI details
+ *  2. Block duplicate pending/processing withdrawals
+ *  3. Store UPI + phone on User (used by admin approval later)
+ *  4. Lock funds atomically: walletPoints → lockedPoints
+ *  5. Create a pending Transaction
+ *
+ * ⚠️  NO Razorpay calls here — all Razorpay contact/fund_account/payout
+ *     creation happens in adminController.approveWithdrawal so this endpoint
+ *     works in development without live Razorpay credentials.
+ */
 export const withdrawFunds = async (req, res) => {
   const session = await mongoose.startSession();
   try {
+    console.log('[WITHDRAW] Request received', req.body);
+
     const { amount, upiId, phone } = req.body;
-    if (req.user.role !== 'mentor') return res.status(403).json({ message: 'Only mentors can withdraw' });
-    if (!amount || amount < 100) return res.status(400).json({ message: 'Minimum withdrawal amount is 100 pts' });
-    if (!upiId || !phone) return res.status(400).json({ message: 'UPI ID and Phone number are required for withdrawal payloads' });
 
-    // Ensure user has saved info
-    await User.findByIdAndUpdate(req.user._id, { $set: { upiId, phone } });
+    // ── Input guards ──────────────────────────────────────────────────────────
+    if (req.user.role !== 'mentor') {
+      return res.status(403).json({ message: 'Only mentors can withdraw' });
+    }
+    if (!amount || Number(amount) <= 0) {
+      return res.status(400).json({ message: 'Invalid amount' });
+    }
+    if (!upiId || !String(upiId).includes('@')) {
+      return res.status(400).json({ message: 'Valid UPI ID is required (e.g. name@upi)' });
+    }
+    if (!phone || String(phone).replace(/\D/g, '').length < 10) {
+      return res.status(400).json({ message: 'Valid 10-digit phone number is required' });
+    }
 
-    let transaction;
-    let payoutResult;
-    
-    // razorpay singleton already initialised at startup
-    const contact = await razorpay.contacts.create({
-      name: req.user.name,
-      email: req.user.email,
-      contact: phone,
-      type: "vendor"
-    });
-
-    const fundAccount = await razorpay.fund_accounts.create({
-      contact_id: contact.id,
-      account_type: "vpa",
-      vpa: {
-        address: upiId
-      }
-    });
-
+    // amount entered in rupees (or points as shown in UI), stored in paise
     const integerAmount = Math.round(Number(amount) * 100);
 
-    const payout = await razorpay.payouts.create({
-      account_number: process.env.RAZORPAY_ACCOUNT_NUMBER,
-      fund_account_id: fundAccount.id,
-      amount: integerAmount, 
-      currency: "INR",
-      mode: "UPI",
-      purpose: "payout"
+    if (integerAmount < 10000) {   // ₹100 minimum = 10000 paise
+      return res.status(400).json({ message: 'Minimum withdrawal is ₹100 (enter 100 or more)' });
+    }
+
+    // ── Duplicate guard ───────────────────────────────────────────────────────
+    const alreadyPending = await Transaction.findOne({
+      userId: req.user._id,
+      reason: 'withdrawal',
+      status: { $in: ['pending', 'processing'] },
+    });
+    if (alreadyPending) {
+      return res.status(400).json({ message: 'A withdrawal is already pending or processing. Wait for it to resolve first.' });
+    }
+
+    // ── Persist UPI + phone on User (no Razorpay here) ───────────────────────
+    await User.findByIdAndUpdate(req.user._id, {
+      $set: { upiId: String(upiId).trim(), phone: String(phone).trim() },
     });
 
-    // Payout instance created safely, now lock funds transactionally
+    // ── Atomic lock + Transaction ─────────────────────────────────────────────
+    let transaction;
     await session.withTransaction(async () => {
-      // 3. Withdrawal Double Request Protection
-      const existing = await Transaction.findOne({
-        userId: req.user._id,
-        reason: 'withdrawal',
-        status: { $in: ['pending', 'processing'] }
-      }).session(session);
-
-      if (existing) {
-        throw new Error('WITHDRAWAL_ALREADY_PENDING');
-      }
-
       const currentWallet = await Wallet.findOne({ userId: req.user._id }).session(session);
-      
-      if (!currentWallet || currentWallet.balance < integerAmount) {
-        throw new Error('INSUFFICIENT_FUNDS');
-      }
+      if (!currentWallet) throw new Error('WALLET_NOT_FOUND');
+      if (currentWallet.walletPoints < integerAmount) throw new Error('INSUFFICIENT_FUNDS');
 
-      // Freeze funds safely from wallet
+      // Move walletPoints → lockedPoints atomically (optimistic lock)
       const wallet = await Wallet.findOneAndUpdate(
-        { userId: req.user._id, balance: { $gte: integerAmount }, __v: currentWallet.__v },
-        { $inc: { balance: -integerAmount, totalSpent: integerAmount, __v: 1 } },
+        { userId: req.user._id, walletPoints: { $gte: integerAmount }, __v: currentWallet.__v },
+        { $inc: { walletPoints: -integerAmount, lockedPoints: integerAmount,
+                  balance: -integerAmount, __v: 1 } },
         { new: true, session }
       );
-      if (!wallet) throw new Error('OPTIMISTIC_LOCK_OR_INSUFFICIENT_FUNDS');
+      if (!wallet) throw new Error('OPTIMISTIC_LOCK_FAILED');
 
-      // 5. Withdrawal Safety (status: processing) mapped to Payout Reference
-      const txPayload = [{
-        userId: req.user._id,
-        type: 'debit',
-        amount: integerAmount,
-        reason: 'withdrawal',
-        referenceId: payout.id,
-        status: 'processing',
-        payoutRef: payout.id, // Full traceability
-        actorId: req.user._id,
-        actorRole: req.user.role
-      }];
-      const result = await Transaction.create(txPayload, { session });
+      const result = await Transaction.create([{
+        userId:      req.user._id,
+        type:        'debit',
+        amount:      integerAmount,
+        reason:      'withdrawal',
+        referenceId: `wd_${req.user._id}_${Date.now()}`,
+        status:      'pending',
+        actorId:     req.user._id,
+        actorRole:   req.user.role,
+      }], { session });
       transaction = result[0];
     });
 
     const newWallet = await getWallet(req.user._id);
-    res.json({ message: 'Withdrawal processing started via UPI!', balance: newWallet.balance, transaction });
+    console.log('[WITHDRAW] Success', { walletPoints: newWallet.walletPoints, lockedPoints: newWallet.lockedPoints });
+
+    return res.status(200).json({
+      message:      'Withdrawal request submitted. Awaiting admin approval.',
+      walletPoints: newWallet.walletPoints,
+      lockedPoints: newWallet.lockedPoints,
+      transaction,
+    });
+
   } catch (err) {
-    if (err.message === 'INSUFFICIENT_FUNDS') return res.status(400).json({ message: 'Insufficient funds' });
-    if (err.message === 'WITHDRAWAL_ALREADY_PENDING') return res.status(400).json({ message: 'Withdrawal already pending' });
-    console.error(err);
-    res.status(500).json({ message: 'Server error', error: err.message });
+    const knownErrors = {
+      WALLET_NOT_FOUND:      [404, 'Wallet not found'],
+      INSUFFICIENT_FUNDS:    [400, 'Insufficient walletPoints balance'],
+      OPTIMISTIC_LOCK_FAILED:[400, 'Concurrent update — please retry'],
+    };
+    const [status, message] = knownErrors[err.message] ?? [500, 'Server error'];
+    if (status === 500) console.error('[WITHDRAW_ERROR]', err);
+    return res.status(status).json({ message });
   } finally {
     session.endSession();
   }

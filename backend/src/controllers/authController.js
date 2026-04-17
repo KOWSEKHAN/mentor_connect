@@ -7,8 +7,9 @@ import pdfParse from 'pdf-parse'
 import Tesseract from 'tesseract.js'
 import mammoth from 'mammoth'
 import { extractKeywords } from '../utils/resumeParser.js'
-import { grantPointsOnce } from '../services/pointService.js'
 import { getJwtSecret } from '../config/jwt.js'
+import { getWallet, processCredit, creditRewardPoints } from '../services/walletService.js'
+import Transaction from '../models/Transaction.js'
 
 const readFileTextByType = async (filePath, mimeType) => {
   const ext = path.extname(filePath || '').toLowerCase()
@@ -58,6 +59,9 @@ export const signup = async (req, res) => {
     const { name, email, password, role, interests } = req.body
     if (!name || !email || !password || !role) {
       return res.status(400).json({ message: 'All fields are required' })
+    }
+    if (role === 'admin') {
+      return res.status(400).json({ message: 'Cannot register as admin via public endpoint' })
     }
 
     const existing = await User.findOne({ email })
@@ -121,24 +125,57 @@ export const signup = async (req, res) => {
 
     const user = await User.create(userData)
 
-    try {
-      await grantPointsOnce(user._id, 100, 'signup', `signup:${user._id}`, 'Signup reward')
-    } catch (ptErr) {
-      console.error('Signup reward failed:', ptErr)
+    // ── Signup bonus: mentees only, exactly once ─────────────────────────────
+    if (user.role === 'mentee') {
+      try {
+        const signupRef = `signup_${user._id}`;
+
+        // DB-level unique index on { userId, referenceId, reason } guarantees idempotency
+        const alreadyRewarded = await Transaction.findOne({
+          userId: user._id,
+          reason: 'signup_bonus',
+          referenceId: signupRef
+        });
+
+        if (!alreadyRewarded) {
+          // Part 4: Signup bonus → rewardPoints (virtual), NOT walletPoints (real money)
+          // 10,000 raw points = 100 display points (stored as-is, not ×100)
+          await creditRewardPoints(
+            user._id,
+            10000,          // 10,000 reward points (100 display pts)
+            'signup_bonus',
+            signupRef,
+            user._id,
+            'system'
+          );
+          console.log(`[SIGNUP_BONUS] Granted 10,000 reward pts to mentee ${user._id}`);
+        } else {
+          console.log(`[SIGNUP_BONUS] Already rewarded — skipping for ${user._id}`);
+        }
+      } catch (bonusErr) {
+        // Non-fatal: user is created even if reward fails.
+        // Log full error so it's visible during debugging.
+        console.error('[SIGNUP_BONUS_ERROR]', bonusErr.message, bonusErr);
+      }
     }
+    // ─────────────────────────────────────────────────────────────────────────
 
-    const { getWallet } = await import('../services/walletService.js');
-    const wallet = await getWallet(user._id);
+    // Part 1: Only create/fetch wallet for mentor and mentee — admin has no wallet
+    const hasWallet = ['mentor', 'mentee'].includes(user.role);
+    const wallet = hasWallet ? await getWallet(user._id) : null;
 
-    const token = jwt.sign({ id: user._id, role: user.role }, getJwtSecret(), { expiresIn: '7d' })
+    const token = jwt.sign({ id: user._id, role: user.role, tokenVersion: user.tokenVersion ?? 0 }, getJwtSecret(), { expiresIn: '7d' })
     const userPayload = {
       id: user._id,
       _id: user._id,
       name: user.name,
       email: user.email,
       role: user.role,
-      points: wallet.balance,
-      walletInfo: wallet,
+      // Part 7: Separate display values
+      walletPoints:  wallet?.walletPoints ?? 0,
+      rewardPoints:  wallet?.rewardPoints ?? 0,
+      points:        wallet?.walletPoints ?? 0,   // legacy alias
+      walletInfo:    wallet ?? null,
     }
     res.status(201).json({ message: 'Signup successful', user: userPayload, token })
   } catch (err) {
@@ -158,18 +195,19 @@ export const login = async (req, res) => {
     const match = await bcrypt.compare(password, user.password)
     if (!match) return res.status(400).json({ message: 'Invalid credentials' })
 
-    const { getWallet } = await import('../services/walletService.js');
-    const wallet = await getWallet(user._id);
+    // Part 1: Admin has no wallet — skip getWallet entirely
+    const hasWallet = ['mentor', 'mentee'].includes(user.role);
+    const wallet = hasWallet ? await getWallet(user._id) : null;
 
-    const token = jwt.sign({ id: user._id, role: user.role }, getJwtSecret(), { expiresIn: '7d' })
+    const token = jwt.sign({ id: user._id, role: user.role, tokenVersion: user.tokenVersion ?? 0 }, getJwtSecret(), { expiresIn: '7d' })
     const userPayload = {
       id: user._id,
       _id: user._id,
       name: user.name,
       email: user.email,
       role: user.role,
-      points: wallet.balance,
-      walletInfo: wallet,
+      points: wallet?.balance ?? 0,
+      walletInfo: wallet ?? null,
     }
     res.json({ message: 'Login successful', user: userPayload, token })
   } catch (err) {
@@ -187,8 +225,9 @@ export const getMe = async (req, res) => {
     const user = await User.findById(req.user._id).select('-password').lean()
     if (!user) return res.status(401).json({ message: 'User not found' })
 
-    const { getWallet } = await import('../services/walletService.js');
-    const wallet = await getWallet(user._id);
+    // Part 1: Admin has no wallet
+    const hasWallet = ['mentor', 'mentee'].includes(user.role);
+    const wallet = hasWallet ? await getWallet(user._id) : null;
 
     const userPayload = {
       id: user._id,
@@ -196,8 +235,8 @@ export const getMe = async (req, res) => {
       name: user.name,
       email: user.email,
       role: user.role,
-      points: wallet.balance,
-      walletInfo: wallet,
+      points: wallet?.balance ?? 0,
+      walletInfo: wallet ?? null,
     }
     res.json({ user: userPayload })
   } catch (err) {

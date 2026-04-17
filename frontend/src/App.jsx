@@ -6,10 +6,12 @@ import MentorDashboard from "./pages/mentor/MentorDashboard";
 import MentorWorkspace from "./pages/mentor/MentorWorkspace";
 import MentorRealtimeConsole from "./pages/mentor/MentorRealtimeConsole";
 import MentorProfile from "./pages/mentor/Profile";
+import MentorWallet from "./pages/mentor/MentorWallet";
 import MenteeDashboard from "./pages/mentee/MenteeDashboard";
 import MenteeProfile from "./pages/mentee/Profile";
 import CourseWorkspace from "./pages/mentee/CourseWorkspace";
 import CommunityChat from "./pages/community/CommunityChat";
+import AdminDashboard from "./pages/admin/AdminDashboard";
 import NotFound from "./pages/NotFound";
 import { AuthProvider, useAuth } from "./utils/auth";
 import { CommunityUnreadProvider } from "./context/CommunityUnreadContext";
@@ -109,6 +111,16 @@ function App() {
               }
             />
             <Route
+              path="/mentor/wallet"
+              element={
+                <PageTransition>
+                  <ProtectedRoute role="mentor">
+                    <MentorWallet />
+                  </ProtectedRoute>
+                </PageTransition>
+              }
+            />
+            <Route
               path="/mentee"
               element={
                 <PageTransition>
@@ -144,6 +156,16 @@ function App() {
                 <PageTransition>
                   <ProtectedRoute>
                     <CommunityChat />
+                  </ProtectedRoute>
+                </PageTransition>
+              }
+            />
+            <Route
+              path="/admin"
+              element={
+                <PageTransition>
+                  <ProtectedRoute role="admin">
+                    <AdminDashboard />
                   </ProtectedRoute>
                 </PageTransition>
               }

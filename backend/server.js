@@ -35,6 +35,7 @@ import structuredLearningRoutes from './src/routes/structuredLearningRoutes.js'
 import realtimeRoutes from './src/routes/realtimeRoutes.js'
 import walletRoutes from './src/routes/walletRoutes.js'
 import paymentRoutes from './src/routes/paymentRoutes.js'
+import adminRoutes from './src/routes/adminRoutes.js'
 import { startProgressIntegrityJob } from './src/jobs/progressIntegrityJob.js'
 
 const app = express()
@@ -85,6 +86,7 @@ app.use('/api/structured', structuredLearningRoutes)
 app.use('/api/realtime', realtimeRoutes)
 app.use('/api/wallet', walletRoutes)
 app.use('/api/payment', paymentRoutes)
+app.use('/api/admin', adminRoutes)
 
 app.get('/', (req, res) => res.send('MentorConnect Backend is running'))
 
@@ -193,6 +195,12 @@ io.on('connection', (socket) => {
     socket.join(roomName)
     socket.emit('joined_course_room', { courseId, room: roomName })
   })
+
+  // Part 5: Auto-join personal user room for request lifecycle events
+  // (price_updated, request_accepted, request_rejected)
+  if (socket.userId) {
+    socket.join(`user_${socket.userId}`)
+  }
 
   socket.on('leave_course_room', (payload = {}) => {
     const { courseId } = payload
