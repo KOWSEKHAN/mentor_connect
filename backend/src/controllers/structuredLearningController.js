@@ -4,7 +4,8 @@ import Course from '../models/Course.js';
 import Roadmap from '../models/Roadmap.js';
 import AIContent from '../models/AIContent.js';
 import Task from '../models/Task.js';
-import { generateStructuredContent } from '../services/phiService.js';
+import { callLLM } from '../services/aiService.js';
+import { buildContentPrompt } from '../services/promptBuilder.js';
 import { metrics } from '../observability/metrics.js';
 import {
   emitCourseEvent,
@@ -255,12 +256,14 @@ export const upsertLevelContent = async (req, res) => {
     if (!hasManualContent) {
       const fallbackContent = generateLevelTemplate(ms.domain, level, prompt);
       try {
-        const raw = await generateStructuredContent({
-          type: 'level_content',
+        const pPrompt = buildContentPrompt({
+          courseTitle: ms.domain || prompt || 'general',
           level,
-          domain: ms.domain || prompt || 'general',
-          role: 'mentor',
+          mentorPrompt: prompt,
+          prevContext: ''
         });
+        const result = await callLLM({ prompt: pPrompt });
+        const raw = result.response || result;
         const parsed = safeParseJson(raw);
         content = formatLevelContentFromJson(level, parsed, fallbackContent);
       } catch (aiErr) {

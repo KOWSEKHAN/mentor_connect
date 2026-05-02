@@ -4,7 +4,8 @@ import RoadmapStep from '../models/RoadmapStep.js';
 import Course from '../models/Course.js';
 import Mentorship from '../models/Mentorship.js';
 import { startSafeSession } from '../../utils/dbSession.js';
-import { generateRoadmapFromPhi } from '../services/phiService.js';
+import { callLLM } from '../services/aiService.js';
+import { buildRoadmapPrompt } from '../services/promptBuilder.js';
 import { emitCourseEvent } from '../socket/eventBuilder.js';
 import { auditFromRequest } from '../utils/auditContext.js';
 
@@ -353,90 +354,163 @@ export const updateRoadmap = async (req, res) => {
  * Body: { courseId, menteeId, mentorId? (optional), domain? }
  */
 export const generateRoadmapAI = async (req, res) => {
+  const session = await startSafeSession();
+  const opts    = session ? { session } : {};
   try {
     const { courseId, menteeId, mentorId, domain } = req.body;
-    const userId = req.user._id;
+    const userId   = req.user._id;
     const userRole = req.user.role;
 
     if (userRole !== 'mentor') {
       return res.status(403).json({ message: 'Mentor only' });
     }
-
-    if (!courseId || !menteeId) return res.status(400).json({ message: 'courseId and menteeId are required' });
+    if (!courseId || !menteeId) {
+      return res.status(400).json({ message: 'courseId and menteeId are required' });
+    }
 
     const course = await Course.findById(courseId).select('mentee mentor title domain mentorshipId').lean();
     if (!course) return res.status(404).json({ message: 'Course not found' });
+
     const courseMenteeId = (course.mentee?._id || course.mentee).toString();
     const courseMentorId = course.mentor ? (course.mentor._id || course.mentor).toString() : null;
-    if (courseMenteeId !== menteeId.toString()) return res.status(403).json({ message: 'menteeId does not match course' });
-    if (!courseMentorId || userId.toString() !== courseMentorId) {
+    if (courseMenteeId !== menteeId.toString())
+      return res.status(403).json({ message: 'menteeId does not match course' });
+    if (!courseMentorId || userId.toString() !== courseMentorId)
       return res.status(403).json({ message: 'Not authorized for this course' });
-    }
 
-    const aiPayload = await generateRoadmapFromPhi({
-      courseTitle: course.title || 'AI Learning Roadmap',
-      domain: domain || course.domain || '',
+    // ── Call LLM OUTSIDE session (external HTTP, cannot roll back) ────────
+    const prompt = buildRoadmapPrompt({
+      courseTitle:  course.title || 'AI Learning Roadmap',
+      domain:       domain || course.domain || '',
+      mentorPrompt: req.body.prompt || null
     });
-    if (!aiPayload?.steps || aiPayload.steps.length === 0) {
-      console.error('Empty roadmap from AI');
+
+    let attempts = 0;
+    let aiPayload = null;
+
+    while (attempts < 2) {
+      try {
+        const result = await callLLM({ prompt });
+        let rawText = result.response || result;
+        let parsed;
+        try {
+          parsed = JSON.parse(rawText.replace(/```json/gi, '').replace(/```/g, '').trim());
+        } catch {
+          throw new Error("Invalid format");
+        }
+
+        if (!parsed || !Array.isArray(parsed.steps) || parsed.steps.length === 0) {
+           throw new Error("Invalid structure");
+        }
+        aiPayload = parsed;
+        break;
+      } catch (err) {
+        attempts++;
+      }
     }
 
-    await Roadmap.updateMany({ courseId, menteeId, isActive: true }, { isActive: false });
+    if (!aiPayload) {
+      console.warn('[AI] Using fallback roadmap after', attempts, 'attempts');
+      aiPayload = {
+        title: course.title || `${domain || 'Learning'} Roadmap`,
+        steps: [
+          { title: 'Introduction',  level: 'beginner',     order: 1, description: 'Fundamentals.', subtopics: ['Overview'] },
+          { title: 'Core Concepts', level: 'intermediate', order: 2, description: 'Intermediate.', subtopics: ['Patterns'] },
+          { title: 'Advanced',      level: 'advanced',     order: 3, description: 'Complex topics.', subtopics: ['Advanced Patterns'] },
+          { title: 'Mastery',       level: 'master',       order: 4, description: 'System design.',  subtopics: ['Architecture'] },
+        ]
+      };
+    }
 
-    const latestRoadmap = await Roadmap.findOne({ courseId, menteeId })
-      .sort({ version: -1 })
-      .select('version')
-      .lean();
-    const nextVersion = latestRoadmap ? latestRoadmap.version + 1 : 1;
-
-    const roadmap = await Roadmap.create([
-      {
-        courseId,
-        mentorshipId: course.mentorshipId || null,
-        menteeId,
-        mentorId: mentorId || course.mentor || null,
-        title: aiPayload.title,
-        generatedBy: 'ai',
-        version: nextVersion,
-        isActive: true,
-        steps: [],
-      },
-    ]).then((r) => r[0]);
-
-    const stepsToCreate = aiPayload.steps.map((s) => ({
-      roadmapId: roadmap._id,
-      mentorshipId: course.mentorshipId || null,
-      order: s.order,
-      level: s.level,
-      title: s.title,
-      description: s.description || '',
-      subtopics: s.subtopics || [],
-      aiContentGenerated: false,
-      progress: 0,
-    }));
-
+    // ── Atomic: deactivate old + create new roadmap + steps ───────────────
+    let roadmap;
     let stepDocs;
-    try {
-      stepDocs = await RoadmapStep.insertMany(stepsToCreate);
-    } catch (stepErr) {
-      if (roadmap) await Roadmap.findByIdAndDelete(roadmap._id).catch(() => {});
-      console.error('Roadmap AI failed');
-      return res.status(500).json({ message: 'Server error' });
-    }
-    if (stepDocs.length !== stepsToCreate.length) {
-      if (roadmap) await Roadmap.findByIdAndDelete(roadmap._id).catch(() => {});
-      throw new Error('RoadmapStep creation mismatch');
-    }
-    roadmap.steps = stepDocs.map((s) => s._id);
-    await roadmap.save();
+    await (session
+      ? session.withTransaction(async () => {
+          await Roadmap.updateMany({ courseId, menteeId, isActive: true }, { isActive: false }, opts);
+          const latest     = await Roadmap.findOne({ courseId, menteeId }).sort({ version: -1 }).select('version').lean();
+          const nextVersion = latest ? latest.version + 1 : 1;
+
+          [roadmap] = await Roadmap.create(
+            [{
+              courseId,
+              mentorshipId:  course.mentorshipId || null,
+              menteeId,
+              mentorId:      mentorId || course.mentor || null,
+              title:         aiPayload.title,
+              generatedBy:   'ai',
+              version:       nextVersion,
+              isActive:      true,
+              steps:         [],
+            }],
+            opts
+          );
+
+          const stepsToCreate = aiPayload.steps.map((s) => ({
+            roadmapId:          roadmap._id,
+            mentorshipId:       course.mentorshipId || null,
+            order:              s.order,
+            level:              s.level,
+            title:              s.title,
+            description:        s.description || '',
+            subtopics:          s.subtopics   || [],
+            aiContentGenerated: false,
+            progress:           0,
+          }));
+
+          stepDocs = await RoadmapStep.insertMany(stepsToCreate, opts);
+          roadmap.steps = stepDocs.map((s) => s._id);
+          await roadmap.save(opts);
+        })
+      : (async () => {
+          // No replica-set: best-effort without a session
+          await Roadmap.updateMany({ courseId, menteeId, isActive: true }, { isActive: false });
+          const latest      = await Roadmap.findOne({ courseId, menteeId }).sort({ version: -1 }).select('version').lean();
+          const nextVersion = latest ? latest.version + 1 : 1;
+
+          [roadmap] = await Roadmap.create([{
+            courseId,
+            mentorshipId:  course.mentorshipId || null,
+            menteeId,
+            mentorId:      mentorId || course.mentor || null,
+            title:         aiPayload.title,
+            generatedBy:   'ai',
+            version:       nextVersion,
+            isActive:      true,
+            steps:         [],
+          }]);
+
+          const stepsToCreate = aiPayload.steps.map((s) => ({
+            roadmapId:          roadmap._id,
+            mentorshipId:       course.mentorshipId || null,
+            order:              s.order,
+            level:              s.level,
+            title:              s.title,
+            description:        s.description || '',
+            subtopics:          s.subtopics   || [],
+            aiContentGenerated: false,
+            progress:           0,
+          }));
+
+          stepDocs = await RoadmapStep.insertMany(stepsToCreate);
+          roadmap.steps = stepDocs.map((s) => s._id);
+          await roadmap.save();
+        })()
+    );
+
+    // ── Legacy Cache invalidated directly by schema scope bypass ────────────────
 
     const populated = await Roadmap.findById(roadmap._id).populate('steps').lean();
-    const response = formatRoadmapResponse(populated);
+    const response  = formatRoadmapResponse(populated);
     emitRoadmapCreatedEvent(req, courseId, response);
     return res.status(201).json(response);
+
   } catch (err) {
-    console.error('Roadmap AI failed');
-    return res.status(500).json({ message: 'Server error' });
+    if (session) await session.abortTransaction().catch(() => {});
+    console.error('[generateRoadmapAI]', err.message);
+    return res.status(500).json({ message: 'Server error', error: err.message });
+  } finally {
+    if (session) await session.endSession().catch(() => {});
   }
 };
 

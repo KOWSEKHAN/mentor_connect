@@ -1,53 +1,41 @@
-export function buildPrompt({ type, domain, level }) {
-  if (type === "roadmap") {
-    return `
-You are an expert mentor.
+export const buildContentPrompt = ({ courseTitle, level, step, mentorPrompt, prevContext }) => `
+You are an expert educator.
 
-Create a learning roadmap for ${domain}.
+Course: ${courseTitle}
+Level: ${level}
 
-STRICT RULES:
-- Return ONLY valid JSON
-- NO explanation
-- NO markdown
-- NO extra text
+Topic:
+${step}
 
-FORMAT:
+Previous Context:
+${prevContext || "None"}
+
+Instructions:
+${mentorPrompt}
+
+Return ONLY valid JSON:
+{
+  "explanation": "...",
+  "examples": ["..."],
+  "resources": ["..."]
+}
+`;
+
+export const buildRoadmapPrompt = ({ courseTitle, domain, mentorPrompt }) => `
+You are an expert mentor designing a structured learning roadmap.
+
+Course: "${courseTitle}"
+Domain: ${domain}
+Instructions: ${mentorPrompt || "None"}
+
+Return ONLY JSON:
 {
   "title": "string",
   "steps": [
-    {
-      "title": "string",
-      "level": "beginner | intermediate | advanced | master",
-      "order": number,
-      "description": "string",
-      "subtopics": ["string"]
-    }
+    { "level": "beginner", "title": "...", "description": "...", "subtopics": ["..."] },
+    { "level": "intermediate", "title": "...", "description": "...", "subtopics": ["..."] },
+    { "level": "advanced", "title": "...", "description": "...", "subtopics": ["..."] },
+    { "level": "master", "title": "...", "description": "...", "subtopics": ["..."] }
   ]
 }
 `;
-  }
-
-  if (type === "level_content") {
-    return `
-You are an expert mentor generating learning material for a single roadmap level.
-
-Target domain: ${domain || "general"}
-Target level: ${(level || "beginner").toLowerCase()}
-
-STRICT RULES:
-- Return ONLY valid JSON
-- NO markdown
-- NO explanation text outside JSON
-
-REQUIRED JSON SHAPE:
-{
-  "level": "beginner | intermediate | advanced | master",
-  "explanation": "string",
-  "examples": ["string", "string"],
-  "resources": ["string"]
-}
-`;
-  }
-
-  return `Generate useful learning content for ${domain || "general"}`;
-}

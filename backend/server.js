@@ -37,6 +37,7 @@ import walletRoutes from './src/routes/walletRoutes.js'
 import paymentRoutes from './src/routes/paymentRoutes.js'
 import adminRoutes from './src/routes/adminRoutes.js'
 import { startProgressIntegrityJob } from './src/jobs/progressIntegrityJob.js'
+import { startGenerationCleanupJob } from './src/jobs/generationCleanup.js'
 
 const app = express()
 const httpServer = createServer(app)
@@ -621,6 +622,7 @@ const PORT = process.env.PORT || 5000
 ;(async () => {
   await connectDB()
   startProgressIntegrityJob()
+  startGenerationCleanupJob()   // marks stale 'generating' AI docs as 'failed'
   
   // 5. Start Wallet Reconciliation Job
   const { startReconciliationJob } = await import('./src/jobs/reconcileWallet.js');
