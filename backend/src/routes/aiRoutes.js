@@ -28,9 +28,9 @@ const aiGenerationLimiter = rateLimit({
 
 /* ── Mentor AI actions ─────────────────────────────────────────────────── */
 router.post('/chat',                      protect, aiGenerationLimiter, aiChat);
-router.post('/generate-level-content',    protect, aiGenerationLimiter, generateLevelContent);  // sync
-router.post('/stream-level-content',      protect, aiGenerationLimiter, streamGenerate);        // SSE streaming ← NEW
-router.post('/content/:courseId',         protect, saveContent);
+router.post('/content/:courseId/generate', protect, aiGenerationLimiter, generateLevelContent);  // sync
+router.post('/content/:courseId/stream',   protect, aiGenerationLimiter, streamGenerate);        // SSE streaming
+router.post('/content/:courseId',          protect, saveContent);
 router.put('/content/:courseId/publish',  protect, publishContent);
 router.patch('/content/:courseId/rate',   protect, rateContent);
 

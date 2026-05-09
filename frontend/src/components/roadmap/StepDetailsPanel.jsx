@@ -14,10 +14,10 @@ export default function StepDetailsPanel({ step, courseId }) {
     const stepId = step.stepId || step._id
     setGenerating(true)
     try {
-      await api.post('/api/ai/generate-content', {
+      await api.post(`/api/ai/content/${courseId}/generate`, {
+        level: step.level || 'beginner',
         roadmapStepId: stepId,
         roadmapId: step.roadmapId,
-        courseId,
       })
       showToast('Content generated successfully', 'success')
       setViewContent(true)

@@ -1,41 +1,29 @@
-export const buildContentPrompt = ({ courseTitle, level, step, mentorPrompt, prevContext }) => `
-You are an expert educator.
+export const buildContentPrompt = ({ level, domain, prompt }) => `You are an expert mentor.
 
-Course: ${courseTitle}
+Generate structured learning content.
+
 Level: ${level}
+Domain: ${domain || "general"}
 
-Topic:
-${step}
+Requirements:
+- Clear explanation
+- Minimum 2 examples
+- Useful learning resources
 
-Previous Context:
-${prevContext || "None"}
+Respond in JSON format with keys:
+explanation, examples, resources
 
-Instructions:
-${mentorPrompt}
+User Input:
+${prompt && prompt.trim().length > 5 ? prompt.trim() : "No additional instructions"}`;
 
-Return ONLY valid JSON:
-{
-  "explanation": "...",
-  "examples": ["..."],
-  "resources": ["..."]
-}
-`;
-
-export const buildRoadmapPrompt = ({ courseTitle, domain, mentorPrompt }) => `
-You are an expert mentor designing a structured learning roadmap.
+export const buildRoadmapPrompt = ({ courseTitle, domain, mentorPrompt }) => `You are an expert mentor designing a structured learning roadmap.
 
 Course: "${courseTitle}"
 Domain: ${domain}
-Instructions: ${mentorPrompt || "None"}
+Instructions: ${mentorPrompt && mentorPrompt.trim().length > 5 ? mentorPrompt.trim() : "None"}
 
-Return ONLY JSON:
-{
-  "title": "string",
-  "steps": [
-    { "level": "beginner", "title": "...", "description": "...", "subtopics": ["..."] },
-    { "level": "intermediate", "title": "...", "description": "...", "subtopics": ["..."] },
-    { "level": "advanced", "title": "...", "description": "...", "subtopics": ["..."] },
-    { "level": "master", "title": "...", "description": "...", "subtopics": ["..."] }
-  ]
-}
-`;
+Return ONLY valid JSON with keys:
+title, steps
+
+Each object in the 'steps' array MUST have these keys:
+level, title, description, subtopics`;

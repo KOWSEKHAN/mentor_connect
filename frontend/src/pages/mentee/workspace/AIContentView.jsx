@@ -190,8 +190,8 @@ function AIContentViewInner({
     setShowPrompt(false)
     setNoRoadmap(false)
     try {
-      const res = await api.post('/api/ai/generate-level-content', {
-        courseId, level: selectedLevel, prompt,
+      const res = await api.post(`/api/ai/content/${courseId}/generate`, {
+        level: selectedLevel, prompt,
       })
       const { content, version, status, usedFallback, attempts } = res.data
       setDocMap(prev => ({ ...prev, [selectedLevel]: { ...prev[selectedLevel], content, version, status, generationStatus: 'idle' } }))
@@ -231,10 +231,10 @@ function AIContentViewInner({
     abortControllerRef.current = new AbortController()
 
     try {
-      const res = await fetch('/api/ai/stream-level-content', {
+      const res = await fetch(`/api/ai/content/${courseId}/stream`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
-        body:    JSON.stringify({ courseId, level: selectedLevel, prompt }),
+        body:    JSON.stringify({ level: selectedLevel, prompt }),
         signal:  abortControllerRef.current.signal
       })
 

@@ -76,22 +76,72 @@ export const createStreamPolyfill = (text) => {
 };
 
 const callGroq = async ({ prompt, stream = false, signal, selectedModel }) => {
+  console.log("GROQ KEY PRESENT:", !!process.env.GROQ_API_KEY);
+  console.log("KEY PREFIX:", process.env.GROQ_API_KEY?.slice(0, 8));
+
+  if (!prompt || prompt.trim().length < 20) {
+    throw new Error("INVALID_PROMPT_BLOCKED");
+  }
+
+  console.log("FINAL PROMPT LENGTH:", prompt.length);
+  console.log("FIRST 100 CHARS:", prompt.slice(0,100).replace(/\n/g, ' '));
+
+  const envModel = selectedModel || process.env.GROQ_MODEL;
+  const isValidModel = (m) => typeof m === 'string' && m.startsWith('llama');
+  const safeModel = isValidModel(envModel) ? envModel : "llama-3.1-8b-instant";
+
+  const safeBody = stream 
+    ? {
+        model: safeModel,
+        messages: [
+          { role: "system", content: "You are an expert mentor who outputs valid JSON." },
+          { role: "user", content: String(prompt).trim() }
+        ],
+        temperature: 0.7,
+        stream: true
+      }
+    : {
+        model: safeModel,
+        messages: [
+          { role: "system", content: "You are an expert mentor who outputs valid JSON." },
+          { role: "user", content: String(prompt).trim() }
+        ],
+        temperature: 0.7,
+        max_tokens: 1024,
+        response_format: { type: "json_object" }
+      };
+
+  if (!safeBody.messages[1].content || safeBody.messages[1].content.trim().length < 20) {
+    throw new Error("BLOCKED_INVALID_PROMPT");
+  }
+
+  // Double check the constructed payload doesn't violate rules
+  if (!stream && safeBody.stream !== undefined) throw new Error("PAYLOAD_AUDIT_FAILED: stream in non-stream");
+  if (safeBody.prompt !== undefined || safeBody.input !== undefined) throw new Error("PAYLOAD_AUDIT_FAILED: legacy fields");
+  if (!Array.isArray(safeBody.messages)) throw new Error("PAYLOAD_AUDIT_FAILED: non-array messages");
+
+  console.log("FULL GROQ REQUEST:", JSON.stringify(safeBody, null, 2));
+
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({
-      model: selectedModel,
-      messages: [{ role: "user", content: prompt }],
-      stream
-    }),
+    body: JSON.stringify(safeBody),
     signal
   });
 
   if (res.status === 429) throw new Error("RATE_LIMIT");
-  if (!res.ok) throw new Error(`Groq failed with status ${res.status}`);
+  if (!res.ok) {
+    const errorText = await res.text().catch(() => "Could not read error body");
+    console.error("[Groq Error]", {
+      status: res.status,
+      hasKey: !!process.env.GROQ_API_KEY,
+      errorBody: errorText
+    });
+    throw new Error(`Groq failed with status ${res.status}: ${errorText.slice(0, 100)}`);
+  }
 
   if (stream) {
     const rawReader = res.body.getReader();
@@ -129,7 +179,11 @@ const callGroq = async ({ prompt, stream = false, signal, selectedModel }) => {
   }
 
   const data = await res.json();
-  return { response: data.choices[0].message.content, source: "groq" };
+  const text = data.choices?.[0]?.message?.content;
+
+  if (!text) throw new Error("EMPTY_LLM_RESPONSE");
+
+  return { response: text, source: "groq" };
 };
 
 const callOllama = async ({ prompt, stream = false, signal }) => {
@@ -222,8 +276,11 @@ export const callLLM = async ({ prompt, signal, stream = false, courseId, level,
       try {
         aiMetrics.groqCalls++;
         windowMetrics.groqCalls++;
-        finalPayload = await callGroq({ ...(({prompt, stream, signal, selectedModel}) => ({prompt, stream, signal, selectedModel}))({ prompt, stream, signal: controller.signal, selectedModel: (/(design|architecture|optimize|analyze)/i.test(prompt) || prompt.length > 600) ? (process.env.GROQ_MODEL || "llama3-70b-8192") : "llama3-8b-8192" }) });
+        finalPayload = await callGroq({ ...(({prompt, stream, signal, selectedModel}) => ({prompt, stream, signal, selectedModel}))({ prompt, stream, signal: controller.signal, selectedModel: (/(design|architecture|optimize|analyze)/i.test(prompt) || prompt.length > 600) ? (process.env.GROQ_MODEL || "llama-3.3-70b-versatile") : "llama-3.1-8b-instant" }) });
       } catch (err) {
+        if (err.message.includes("BLOCKED") || err.message.includes("PAYLOAD_AUDIT_FAILED")) {
+          throw err; // Fail fast, do not fallback
+        }
         aiMetrics.fallbacks++;
         windowMetrics.fallbacks++;
         if (err.message === "RATE_LIMIT") {
@@ -247,9 +304,16 @@ export const callLLM = async ({ prompt, signal, stream = false, courseId, level,
     if (!stream && finalPayload?.response) {
       let parsed;
       try {
-        parsed = JSON.parse(finalPayload.response.replace(/```json/gi, '').replace(/```/g, '').trim());
-      } catch {
-        parsed = null;
+        let text = finalPayload.response;
+        const startIdx = text.indexOf('{');
+        const endIdx = text.lastIndexOf('}');
+        if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+          text = text.substring(startIdx, endIdx + 1);
+        }
+        parsed = JSON.parse(text.trim());
+      } catch (err) {
+        console.error("[JSON PARSE ERROR] Raw text:", finalPayload.response);
+        throw new Error("INVALID_JSON_FROM_LLM");
       }
 
       if (parsed && typeof parsed === 'object') {
@@ -277,9 +341,41 @@ export const callLLM = async ({ prompt, signal, stream = false, courseId, level,
 };
 
 export const validateContent = (data) => {
-  if (!data || typeof data !== 'object') return false;
-  if (!data.explanation || typeof data.explanation !== 'string') return false;
-  if (!Array.isArray(data.examples)) return false;
-  if (!Array.isArray(data.resources)) return false;
+  if (!data || typeof data !== 'object') {
+    console.error("[VALIDATE] Data is not an object");
+    return false;
+  }
+
+  if (data.explanation && typeof data.explanation === 'object') {
+    data.explanation = data.explanation.description || JSON.stringify(data.explanation);
+  }
+  
+  if (data.example && !data.examples) data.examples = data.example;
+  if (data.resource && !data.resources) data.resources = data.resource;
+
+  if (data.examples && typeof data.examples === 'object' && !Array.isArray(data.examples)) {
+    data.examples = data.examples.list || data.examples.items || Object.values(data.examples);
+  }
+  if (data.resources && typeof data.resources === 'object' && !Array.isArray(data.resources)) {
+    data.resources = data.resources.links || data.resources.items || Object.values(data.resources);
+  }
+
+  if (!data.explanation || typeof data.explanation !== 'string') {
+    console.error("[VALIDATE] explanation missing or not string", typeof data.explanation);
+    return false;
+  }
+  if (!Array.isArray(data.examples)) {
+    console.error("[VALIDATE] examples missing or not array", typeof data.examples);
+    return false;
+  }
+  if (!Array.isArray(data.resources)) {
+    console.error("[VALIDATE] resources missing or not array", typeof data.resources);
+    return false;
+  }
+
+  // Ensure Mongoose doesn't crash on [String] cast if LLM provided objects
+  data.examples = data.examples.map(ex => typeof ex === 'object' ? JSON.stringify(ex) : String(ex));
+  data.resources = data.resources.map(res => typeof res === 'object' ? JSON.stringify(res) : String(res));
+
   return true;
 };

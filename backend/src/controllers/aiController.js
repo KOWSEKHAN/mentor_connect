@@ -228,13 +228,16 @@ export const aiChat = async (req, res) => {
  *  9. Version retention — DB-level double-check prevents race (FIX 3)
  */
 export const generateLevelContent = async (req, res) => {
-  const { courseId, level, prompt } = req.body;
+  const { courseId } = req.params;
+  const { level, prompt } = req.body;
+
+  console.log("REQ BODY:", req.body);
 
   if (!requireMentor(req, res)) return;
   if (!courseId || !mongoose.Types.ObjectId.isValid(courseId))
-    return res.status(400).json({ message: 'Valid courseId is required' });
+    return res.status(400).json({ error: 'Valid courseId is required', received: req.body });
   if (!level || !LEVELS.includes(level))
-    return res.status(400).json({ message: `level must be one of: ${LEVELS.join(', ')}` });
+    return res.status(400).json({ error: `level must be one of: ${LEVELS.join(', ')}`, received: req.body });
 
   // ── 1. Distributed lock ────────────────────────────────────────────────
   const lockKey  = `gen:${courseId}:${level}`;
@@ -341,11 +344,9 @@ export const generateLevelContent = async (req, res) => {
     const globalT0 = Date.now();
     const finalMentorPrompt = [prompt, adaptiveHint].filter(Boolean).join(' | ');
     const finalPrompt = buildContentPrompt({
-      courseTitle: step?.title || '',
       level,
-      step:        step?.description || '',
-      mentorPrompt: finalMentorPrompt,
-      prevContext: prevLevelSummary
+      domain,
+      prompt: finalMentorPrompt
     });
 
     let attempts = 0;
@@ -363,12 +364,19 @@ export const generateLevelContent = async (req, res) => {
          
          let parsed;
          try {
-           parsed = JSON.parse(rawText.replace(/```json/gi, '').replace(/```/g, '').trim());
+           let text = rawText;
+           const startIdx = text.indexOf('{');
+           const endIdx = text.lastIndexOf('}');
+           if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+             text = text.substring(startIdx, endIdx + 1);
+           }
+           parsed = JSON.parse(text.trim());
          } catch {
-           throw new Error("Invalid JSON from LLM");
+           throw new Error("INVALID_JSON_FROM_LLM");
          }
 
          if (!validateContent(parsed)) {
+           console.error("[VALIDATION FAILED] Parsed payload:", JSON.stringify(parsed, null, 2));
            throw new Error("Invalid content structure");
          }
          
@@ -702,14 +710,17 @@ export const getMetrics = async (req, res) => {
  * Client reads via fetch() + ReadableStream — see AIContentView.jsx.
  */
 export const streamGenerate = async (req, res) => {
-  const { courseId, level, prompt } = req.body;
+  const { courseId } = req.params;
+  const { level, prompt } = req.body;
+
+  console.log("REQ BODY (Stream):", req.body);
 
   if (req.user?.role !== 'mentor')
-    return res.status(403).json({ message: 'Mentor only' });
+    return res.status(403).json({ error: 'Mentor only' });
   if (!courseId || !mongoose.Types.ObjectId.isValid(courseId))
-    return res.status(400).json({ message: 'Valid courseId is required' });
+    return res.status(400).json({ error: 'Valid courseId is required', received: req.body });
   if (!level || !LEVELS.includes(level))
-    return res.status(400).json({ message: `level must be one of: ${LEVELS.join(', ')}` });
+    return res.status(400).json({ error: `level must be one of: ${LEVELS.join(', ')}`, received: req.body });
 
   const isChaos = process.env.CHAOS_MODE === 'true';
   const isTelemetry = req.query.telemetry === 'true';
@@ -864,11 +875,9 @@ export const streamGenerate = async (req, res) => {
     // ── Build prompt ────────────────────────────────────────────────────
     const finalMentorPrompt = [prompt, adaptiveHint].filter(Boolean).join(' | ');
     const finalPrompt = buildContentPrompt({
-      courseTitle: step?.title || '',
       level,
-      step:        step?.description || '',
-      mentorPrompt: finalMentorPrompt,
-      prevContext: prevLevelSummary
+      domain,
+      prompt: finalMentorPrompt
     });
 
     // ── Generator functions ──────────────────────────────────────────────
