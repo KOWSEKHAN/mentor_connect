@@ -186,12 +186,15 @@ function AIContentViewInner({
   /** Sync generation (fallback / non-streaming) */
   const handleGenerate = async () => {
     if (!courseId || !isMentor) return
+    
+    const safePrompt = prompt.trim() || "Generate complete learning content";
+    
     setGenerating(true)
     setShowPrompt(false)
     setNoRoadmap(false)
     try {
       const res = await api.post(`/api/ai/content/${courseId}/generate`, {
-        level: selectedLevel, prompt,
+        level: selectedLevel, prompt: safePrompt,
       })
       const { content, version, status, usedFallback, attempts } = res.data
       setDocMap(prev => ({ ...prev, [selectedLevel]: { ...prev[selectedLevel], content, version, status, generationStatus: 'idle' } }))
@@ -224,6 +227,9 @@ function AIContentViewInner({
   /** Streaming generation — shows live tokens via SSE, saves on complete */
   const handleStreamGenerate = async () => {
     if (!courseId || !isMentor) return
+    
+    const safePrompt = prompt.trim() || "Generate complete learning content";
+
     setStreaming(true)
     setStreamText('')
     setShowPrompt(false)
@@ -234,7 +240,7 @@ function AIContentViewInner({
       const res = await fetch(`/api/ai/content/${courseId}/stream`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
-        body:    JSON.stringify({ level: selectedLevel, prompt }),
+        body:    JSON.stringify({ level: selectedLevel, prompt: safePrompt }),
         signal:  abortControllerRef.current.signal
       })
 

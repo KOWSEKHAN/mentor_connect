@@ -2,6 +2,9 @@
 // Native fetch is available in modern Node.js
 import crypto from 'node:crypto';
 
+const isDev = process.env.NODE_ENV !== "production";
+const canUseOllama = process.env.OLLAMA_BASE_URL && isDev;
+
 const promptCache = new Map();
 const inFlight = new Map();
 const CACHE_MAX_SIZE = 500;
@@ -76,15 +79,19 @@ export const createStreamPolyfill = (text) => {
 };
 
 const callGroq = async ({ prompt, stream = false, signal, selectedModel }) => {
-  console.log("GROQ KEY PRESENT:", !!process.env.GROQ_API_KEY);
-  console.log("KEY PREFIX:", process.env.GROQ_API_KEY?.slice(0, 8));
+  if (isDev) {
+    console.log("GROQ KEY PRESENT:", !!process.env.GROQ_API_KEY);
+    console.log("KEY PREFIX:", process.env.GROQ_API_KEY?.slice(0, 8));
+  }
 
   if (!prompt || prompt.trim().length < 20) {
     throw new Error("INVALID_PROMPT_BLOCKED");
   }
 
-  console.log("FINAL PROMPT LENGTH:", prompt.length);
-  console.log("FIRST 100 CHARS:", prompt.slice(0,100).replace(/\n/g, ' '));
+  if (isDev) {
+    console.log("FINAL PROMPT LENGTH:", prompt.length);
+    console.log("FIRST 100 CHARS:", prompt.slice(0,100).replace(/\n/g, ' '));
+  }
 
   const envModel = selectedModel || process.env.GROQ_MODEL;
   const isValidModel = (m) => typeof m === 'string' && m.startsWith('llama');
@@ -120,7 +127,9 @@ const callGroq = async ({ prompt, stream = false, signal, selectedModel }) => {
   if (safeBody.prompt !== undefined || safeBody.input !== undefined) throw new Error("PAYLOAD_AUDIT_FAILED: legacy fields");
   if (!Array.isArray(safeBody.messages)) throw new Error("PAYLOAD_AUDIT_FAILED: non-array messages");
 
-  console.log("FULL GROQ REQUEST:", JSON.stringify(safeBody, null, 2));
+  if (isDev) {
+    console.log("FULL GROQ REQUEST:", JSON.stringify(safeBody, null, 2));
+  }
 
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
@@ -296,9 +305,13 @@ export const callLLM = async ({ prompt, signal, stream = false, courseId, level,
     }
 
     if (!finalPayload) {
-      aiMetrics.ollamaCalls++;
-      windowMetrics.ollamaCalls++;
-      finalPayload = await callOllama({ prompt, stream, signal: controller.signal });
+      if (canUseOllama) {
+        aiMetrics.ollamaCalls++;
+        windowMetrics.ollamaCalls++;
+        finalPayload = await callOllama({ prompt, stream, signal: controller.signal });
+      } else {
+        throw new Error("ALL_AI_MODELS_FAILED");
+      }
     }
 
     if (!stream && finalPayload?.response) {

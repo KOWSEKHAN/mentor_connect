@@ -12,8 +12,16 @@ import Course from './src/models/Course.js'
 import { setRealtimeIO, mentorshipCourseRoom } from './src/socket/realtime.js'
 import { metrics } from './src/observability/metrics.js'
 
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173'
+const CLIENT_ORIGIN = process.env.NODE_ENV === 'production' ? process.env.FRONTEND_URL : (process.env.FRONTEND_URL || 'http://localhost:5173')
 const SECRET = process.env.JWT_SECRET
+
+process.on("unhandledRejection", (err) => {
+  console.error("[UNHANDLED_REJECTION]", err);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("[UNCAUGHT_EXCEPTION]", err);
+});
 
 import authRoutes from './src/routes/authRoutes.js'
 import mentorshipRoutes from './src/routes/mentorshipRoutes.js'
@@ -40,6 +48,7 @@ import { startProgressIntegrityJob } from './src/jobs/progressIntegrityJob.js'
 import { startGenerationCleanupJob } from './src/jobs/generationCleanup.js'
 
 const app = express()
+app.set('trust proxy', 1)
 const httpServer = createServer(app)
 
 const io = new Server(httpServer, {
@@ -641,8 +650,8 @@ const PORT = process.env.PORT || 5000
       console.error('Redis adapter failed (single-node mode):', e.message)
     }
   }
-  httpServer.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`)
-    console.log(`Socket.IO server ready`)
+  httpServer.listen(PORT, '0.0.0.0', () => {
+    console.log(`[BOOT] Server running on port ${PORT}`)
+    console.log(`[SOCKET] Socket.IO server ready`)
   })
 })()

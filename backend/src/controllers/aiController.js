@@ -15,6 +15,8 @@ import {
 } from '../socket/eventBuilder.js';
 import { auditFromRequest } from '../utils/auditContext.js';
 
+const isDev = process.env.NODE_ENV !== "production";
+
 const LEVELS                 = ['beginner', 'intermediate', 'advanced', 'master'];
 const MAX_VERSIONS_PER_LEVEL = 10;
 const LOCK_TTL_SECS          = 60;
@@ -231,7 +233,9 @@ export const generateLevelContent = async (req, res) => {
   const { courseId } = req.params;
   const { level, prompt } = req.body;
 
-  console.log("REQ BODY:", req.body);
+  if (isDev) {
+    console.log("REQ BODY:", req.body);
+  }
 
   if (!requireMentor(req, res)) return;
   if (!courseId || !mongoose.Types.ObjectId.isValid(courseId))
@@ -713,7 +717,9 @@ export const streamGenerate = async (req, res) => {
   const { courseId } = req.params;
   const { level, prompt } = req.body;
 
-  console.log("REQ BODY (Stream):", req.body);
+  if (isDev) {
+    console.log("REQ BODY (Stream):", req.body);
+  }
 
   if (req.user?.role !== 'mentor')
     return res.status(403).json({ error: 'Mentor only' });

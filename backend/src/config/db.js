@@ -9,7 +9,7 @@ const connectDB = async () => {
       return
     }
     await mongoose.connect(uri, {})
-    console.log('MongoDB Connected ✔')
+    console.log('[DB] MongoDB Connected ✔')
     await assertTransactionsAvailable()
   } catch (err) {
     console.error('MongoDB connection error:', err.message)
