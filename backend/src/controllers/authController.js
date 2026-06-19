@@ -186,20 +186,40 @@ export const signup = async (req, res) => {
 
 export const login = async (req, res) => {
   try {
+    console.log('[LOGIN] Request received');
+    console.log('[LOGIN] Body:', req.body);
     const { email, password } = req.body
-    if (!email || !password) return res.status(400).json({ message: 'Email and password required' })
+    if (!email || !password) {
+      console.log('[LOGIN] Missing email or password');
+      return res.status(400).json({ message: 'Email and password required' })
+    }
 
+    console.log('[LOGIN] Before DB query');
     const user = await User.findOne({ email })
-    if (!user) return res.status(400).json({ message: 'Invalid credentials' })
+    console.log('[LOGIN] After DB query, found:', !!user);
+    if (!user) {
+      console.log('[LOGIN] User not found');
+      return res.status(400).json({ message: 'Invalid credentials' })
+    }
 
+    console.log('[LOGIN] Before bcrypt');
     const match = await bcrypt.compare(password, user.password)
-    if (!match) return res.status(400).json({ message: 'Invalid credentials' })
+    console.log('[LOGIN] After bcrypt, match:', match);
+    if (!match) {
+      console.log('[LOGIN] Password mismatch');
+      return res.status(400).json({ message: 'Invalid credentials' })
+    }
 
+<<<<<<< HEAD
     // Part 1: Admin has no wallet — skip getWallet entirely
     const hasWallet = ['mentor', 'mentee'].includes(user.role);
     const wallet = hasWallet ? await getWallet(user._id) : null;
 
     const token = jwt.sign({ id: user._id, role: user.role, tokenVersion: user.tokenVersion ?? 0 }, getJwtSecret(), { expiresIn: '7d' })
+=======
+    console.log('[LOGIN] Before JWT');
+    const token = jwt.sign({ id: user._id, role: user.role }, getJwtSecret(), { expiresIn: '7d' })
+>>>>>>> 3b09b5b (image fif)
     const userPayload = {
       id: user._id,
       _id: user._id,
@@ -209,9 +229,10 @@ export const login = async (req, res) => {
       points: wallet?.balance ?? 0,
       walletInfo: wallet ?? null,
     }
+    console.log('[LOGIN] Response sent');
     res.json({ message: 'Login successful', user: userPayload, token })
   } catch (err) {
-    console.error(err)
+    console.error('[LOGIN] Error:', err)
     res.status(500).json({ message: 'Server error' })
   }
 }
@@ -242,5 +263,48 @@ export const getMe = async (req, res) => {
   } catch (err) {
     console.error(err)
     return res.status(401).json({ message: 'Not authorized' })
+  }
+}
+
+export const dbStatus = async (req, res) => {
+  try {
+    const mongoose = (await import('mongoose')).default
+    const state = mongoose.connection.readyState
+    const states = {
+      0: 'disconnected',
+      1: 'connected',
+      2: 'connecting',
+      3: 'disconnecting'
+    }
+    
+    let queryTest = 'not_run'
+    let queryTime = null
+    let error = null
+    
+    if (state === 1) {
+      try {
+        const start = Date.now()
+        await mongoose.connection.db.admin().ping()
+        queryTest = 'success'
+        queryTime = `${Date.now() - start}ms`
+      } catch (err) {
+        queryTest = 'failed'
+        error = err.message
+      }
+    }
+    
+    return res.json({
+      status: states[state] || 'unknown',
+      readyState: state,
+      queryTest,
+      queryTime,
+      error,
+      env: {
+        hasMongoUri: !!process.env.MONGO_URI,
+        nodeEnv: process.env.NODE_ENV || 'not_set'
+      }
+    })
+  } catch (err) {
+    return res.status(500).json({ error: err.message })
   }
 }

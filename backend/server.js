@@ -51,6 +51,11 @@ const app = express()
 app.set('trust proxy', 1)
 const httpServer = createServer(app)
 
+app.use((req, res, next) => {
+  console.log('[REQUEST]', req.method, req.originalUrl)
+  next()
+})
+
 const io = new Server(httpServer, {
   cors: {
     origin: CLIENT_ORIGIN,

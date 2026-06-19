@@ -3,7 +3,7 @@ import Header from '../components/Header'
 import Footer from '../components/Footer'
 import { Link } from 'react-router-dom'
 
-const HERO_IMAGES = ['/assets/hero1.jpg', '/assets/hero2.jpg', '/assets/hero3.jpg']
+const HERO_IMAGES = ['/assets/hero1.png', '/assets/hero2.png', '/assets/hero3.png']
 const ROTATE_INTERVAL_MS = 4000
 
 export default function Home() {

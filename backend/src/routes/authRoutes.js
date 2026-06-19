@@ -1,7 +1,7 @@
 import express from 'express'
 import multer from 'multer'
 import path from 'path'
-import { signup, login, getMe } from '../controllers/authController.js'
+import { signup, login, getMe, dbStatus } from '../controllers/authController.js'
 import { protect } from '../middleware/auth.js'
 
 const router = express.Router()
@@ -25,5 +25,6 @@ const upload = multer({
 router.post('/signup', upload.single('resume'), signup)
 router.post('/login', login)
 router.get('/me', protect, getMe)
+router.get('/db-status', dbStatus)
 
 export default router
