@@ -210,16 +210,12 @@ export const login = async (req, res) => {
       return res.status(400).json({ message: 'Invalid credentials' })
     }
 
-<<<<<<< HEAD
     // Part 1: Admin has no wallet — skip getWallet entirely
     const hasWallet = ['mentor', 'mentee'].includes(user.role);
     const wallet = hasWallet ? await getWallet(user._id) : null;
 
-    const token = jwt.sign({ id: user._id, role: user.role, tokenVersion: user.tokenVersion ?? 0 }, getJwtSecret(), { expiresIn: '7d' })
-=======
     console.log('[LOGIN] Before JWT');
-    const token = jwt.sign({ id: user._id, role: user.role }, getJwtSecret(), { expiresIn: '7d' })
->>>>>>> 3b09b5b (image fif)
+    const token = jwt.sign({ id: user._id, role: user.role, tokenVersion: user.tokenVersion ?? 0 }, getJwtSecret(), { expiresIn: '7d' })
     const userPayload = {
       id: user._id,
       _id: user._id,
